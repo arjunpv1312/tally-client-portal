@@ -47,7 +47,7 @@ export function AuthGuard({ allow, children }: AuthGuardProps) {
 
   if (!ready) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#F8FAFC] px-6 dark:bg-[#0F172A]">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-white px-6 dark:bg-[#0F172A]">
         <SpinnerRing />
         <div className="w-full max-w-3xl">
           <DashboardLoadingSkeleton />

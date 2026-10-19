@@ -6,7 +6,7 @@ import { LoginForm } from "@/components/LoginForm";
 
 export default function LoginPage() {
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-[#F8FAFC] px-4 py-12 dark:bg-[#0F172A]">
+    <div className="relative flex min-h-screen flex-col items-center justify-center bg-white px-4 py-12 dark:bg-[#0F172A]">
       <div className="absolute right-6 top-6">
         <ThemeToggle />
       </div>

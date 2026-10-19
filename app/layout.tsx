@@ -15,7 +15,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Tally Client Portal",
-  description: "Client reporting and admin portal for Tally integrations",
+  description:
+    "A secure reporting workspace connecting TallyPrime data with client-facing financial dashboards.",
 };
 
 export default function RootLayout({

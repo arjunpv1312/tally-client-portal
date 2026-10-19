@@ -1,132 +1,148 @@
 # Tally Client Reporting Portal
 
-**A secure, cloud-powered reporting workspace for accounting teams and the businesses they serve.**
+**A secure cloud bridge from desktop TallyPrime to role-based financial reporting.**
 
-[![Next.js](https://img.shields.io/badge/Next.js-App_Router-black?logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16.3-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.x-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_Auth-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-Postgres_%2B_Auth-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+[![Framer Motion](https://img.shields.io/badge/Framer_Motion-12.x-BB4BFF?logo=framer&logoColor=white)](https://www.framer.com/motion/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-## Project purpose
+## Executive overview
 
-The Tally Client Reporting Portal bridges desktop TallyPrime accounting data with secure, cloud-based visual analytics. A local sync process can move accounting data from a client's Tally installation into Supabase, where accountants and client stakeholders can access the information appropriate to their role.
+Tally Client Reporting Portal is a cloud reporting workspace for accounting practices and their clients. A trusted machine can read accounting data from desktop TallyPrime over its local XML/HTTP interface and send validated records to Supabase. The Next.js portal then provides a separate, role-aware experience for administrators, employees, and client companies.
 
-The goal is to help a freelance accounting practice grow into a software-enabled service: automate repetitive data collection, give accountants a shared operations workspace, and give each client a timely executive view of its financial position without exposing the underlying desktop accounting system to the public internet.
+The web application includes administrator-managed company and account directories, employee-to-company assignments, authentication, and a read-only financial dashboard. Supabase Row Level Security (RLS) is the database access boundary; the browser never connects directly to TallyPrime.
 
-## Core features
+> **Integration status:** The portal and Supabase schema are present. A `tally_sync.py` integration script and financial reporting tables are **not included yet**. Dashboard charts currently display clearly identified sample data until a sync pipeline and production financial-data schema are connected.
 
-### Administrators
-
-- Create and maintain client company records.
-- Provision confirmed employee and client accounts without public sign-up.
-- Map accounting employees to the companies they maintain.
-- Review the global company, user, and assignment directories.
-- Provide the foundation for a global financial overview as synced reporting data is connected.
-
-### Employees (accountants)
-
-- Use a dedicated daily workspace for assigned client companies.
-- Monitor Tally synchronization health and identify clients whose data is out of date.
-- Track work with task lists, entry status, and error flags.
-- Focus on assigned clients rather than the entire organization.
-
-### Client companies
-
-- Access a read-only executive dashboard scoped to their company.
-- Review interactive revenue, expenses, and profit-margin charts.
-- Follow GST summaries and reporting periods without needing direct access to TallyPrime.
-
-## Architecture
+## System architecture
 
 ```text
-+--------------------+       +---------------------------+       +---------------------------+       +----------------------------+
-| Desktop TallyPrime | ----> | Local Python Sync Engine  | ----> | Supabase Database         | ----> | Next.js Cloud Dashboard    |
-| XML/HTTP on :9000  |       | tally_sync.py (local)      |       | PostgreSQL + Auth + RLS   |       | Admin / Employee / Client  |
-+--------------------+       +---------------------------+       +---------------------------+       +----------------------------+
-                                                                         |
-                                                                         +-- Authenticated access, scoped by role
+  ACCOUNTING DATA PATH
+  +-------------------------+     XML / HTTP :9000     +---------------------------+
+  | Desktop TallyPrime      | -----------------------> | Trusted local sync worker  |
+  | Company books + ledgers |                          | tally_sync.py (to be added)|
+  +-------------------------+                          +-------------+-------------+
+                                                                    |
+                                                   HTTPS / Supabase | API
+                                                                    v
+  +-------------------------+      Auth + RLS        +---------------------------+
+  | Admin / Employee /      | <--------------------> | Supabase                  |
+  | Client in a web browser |                         | Auth + PostgreSQL         |
+  +------------+------------+                         +-------------+-------------+
+               |                                                      ^
+               | HTTPS                                                |
+               v                                                      |
+  +-------------------------+     Supabase JS client / scoped RLS ----+
+  | Next.js App Router       |
+  | Admin / Employee /       |
+  | Client financial views   |
+  +-------------------------+
+
+  ADMIN ACCOUNT PROVISIONING
+  Next.js admin UI --> protected API route --> Supabase Auth Admin
+                       (verified admin)        (server-only key)
 ```
 
-The sync engine should run on a trusted machine that can reach the local TallyPrime instance. Keep service-role credentials and any Tally credentials on that machine or in the server environment; never embed them in browser code.
+The Tally listener should remain on a trusted local network and must not be exposed directly to the public internet. The Supabase service-role key is for server-side account provisioning only: never use it in browser code or expose it through a `NEXT_PUBLIC_` variable.
 
-## Tech stack
+## Roles and authorization
 
-| Area | Technologies |
+| Capability | Admin | Employee | Client company |
+| --- | :---: | :---: | :---: |
+| Manage companies | Yes | — | — |
+| Create employee and client accounts | Yes | — | — |
+| Assign employees to companies | Yes | — | — |
+| View company and account directories | Yes | — | — |
+| View assigned company workspace | — | Yes | — |
+| View own company financial dashboard | — | — | Yes |
+| Public self-registration | No | No | No |
+
+The login screen asks the user to select Admin, Employee, or Client. The selected tab is checked against the signed-in user's `profiles.role`; successful sessions are routed to `/admin`, `/employee`, or `/dashboard`. Database RLS policies remain authoritative even when a route is hidden or guarded in the UI.
+
+## Technology
+
+| Category | Implementation |
 | --- | --- |
-| Frontend | Next.js App Router, React, TypeScript, Tailwind CSS, Framer Motion, Recharts, Lucide React icons |
-| Backend and database | Supabase PostgreSQL, Supabase Auth, Row Level Security (RLS), Supabase JavaScript client |
-| Sync pipeline | Python 3.x, Tally XML/HTTP Gateway (default port 9000) |
+| Framework | Next.js 16 App Router, React 19, TypeScript 5 |
+| Styling and UI | Tailwind CSS 4, CSS theme tokens, Lucide React |
+| Motion and feedback | Framer Motion, Sonner toast notifications |
+| Database | Supabase PostgreSQL with Row Level Security |
+| Authentication | Supabase Auth; administrator-provisioned accounts |
+| Charts | Recharts sales, expense, profit, and GST visualizations |
+| Sync engine | TallyPrime XML/HTTP on port `9000`; Python worker planned, not yet present |
 
-## Local development
+## Quickstart
 
 ### Prerequisites
 
-- Node.js (LTS) and npm
-- A Supabase project
-- Python 3.x for the optional local Tally integration
-- TallyPrime on a machine reachable by the sync process for live data integration
+- Node.js LTS and npm
+- A Supabase project with access to its SQL Editor
+- TallyPrime and Python 3 only when configuring the optional local integration
 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<your-account>/tally-client-portal.git
+git clone https://github.com/arjunpv1312/tally-client-portal.git
 cd tally-client-portal
 npm install
 ```
 
-### 2. Configure environment variables
+### 2. Configure environment
 
-Create `.env.local` in the project root:
+Create `.env.local` in the repository root:
 
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<supabase-anon-or-publishable-key>
-SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-key>
+SUPABASE_SERVICE_ROLE_KEY=<server-only-service-role-key>
 ```
 
-The service-role key is required by the protected admin account-provisioning endpoint. It bypasses RLS and **must remain server-side**: never prefix it with `NEXT_PUBLIC_`, commit it, or expose it in client code. Restart the dev server after changing environment variables.
+The browser uses the public project URL and anon/publishable key. The service-role key is used only by the admin account-provisioning API route. Keep it server-side, out of source control, and out of all `NEXT_PUBLIC_` variables. Restart the dev server after changing environment variables.
 
-### 3. Set up the database
+### 3. Initialize Supabase
 
 1. Open the Supabase project **SQL Editor**.
-2. Run [`supabase/schema.sql`](./supabase/schema.sql) to create the tables, relationships, and RLS policies. If the project already has the older `employee_assignments` table, the schema migrates it to `company_employees`.
-3. Create the first administrator in **Authentication → Users**.
-4. Copy that user's ID and run the final bootstrap `INSERT` shown at the end of `schema.sql`, providing the admin's ID and email.
-5. Add the admin profile before signing in so the role guard and admin-only policies can verify the account.
+2. Run [`supabase/schema.sql`](./supabase/schema.sql). It creates the profile, company, and employee-assignment structures and configures RLS policies.
+3. In **Authentication → Users**, create the first administrator.
+4. Copy the new Auth user's UUID, then run the bootstrap `INSERT` at the end of `schema.sql` with that UUID, email, and an administrator display name.
+5. Sign in at `/login` using the Admin role tab.
 
-Do not disable RLS to make the UI work. Review policies whenever adding new tables or data access paths.
+Do not disable RLS to make the UI work. Create and review policies whenever adding data tables or access paths.
 
-### 4. Run the portal
+### 4. Start the application
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in with an account provisioned by an administrator. There is no public sign-up page.
+Open [http://localhost:3000](http://localhost:3000). There is no public sign-up form. Administrators create employee and client accounts from the admin workspace.
 
-## TallyPrime integration
+Useful checks:
 
-The sync agent should run locally (or on a secured machine on the same network) because Tally's XML/HTTP listener is typically not exposed to the public internet.
+```bash
+npm run lint
+npx tsc --noEmit
+npm run build
+```
 
-### Enable the TallyPrime XML/ODBC listener
+## TallyPrime connection protocol
 
-1. Open the company in TallyPrime and open its connectivity/server settings (the menu wording can vary by TallyPrime release).
-2. Enable the HTTP/XML server, set the listener port to **9000**, and enable ODBC as needed by your integration.
-3. Confirm that TallyPrime is listening locally, typically at `http://localhost:9000`, and that the Windows firewall permits the sync process to connect.
-4. Test the endpoint from the same machine before configuring a scheduled job. Avoid port-forwarding the listener directly to the internet.
+### Enable the local XML/HTTP listener
 
-### Configure and run the Python sync process
+1. Open the target company in TallyPrime and enable its HTTP/XML server in the connectivity settings. Menu labels can differ by release.
+2. Set the listener port to **9000** and enable ODBC only if the integration requires it.
+3. On the same machine, confirm TallyPrime is reachable at `http://localhost:9000`.
+4. Ensure the local firewall permits the intended sync process. Do **not** port-forward this listener or expose it to the public internet.
+5. Validate the request and XML response locally before connecting any uploader.
 
-The repository does not currently include `tally_sync.py`; use or add the sync-engine script for your Tally export requirements. Configure it to:
+### Schedule `tally_sync.py` when available
 
-- Send the required Tally XML requests to `http://localhost:9000`.
-- Parse and validate Tally's XML response before uploading data.
-- Use a Supabase server-side credential stored outside source control (for example, an environment variable), and write only to the tables and columns covered by your sync design.
-- Log sync timestamps, failures, and record counts without logging secrets or unnecessary client data.
-- Make uploads repeatable (upsert or otherwise deduplicate records) so reruns do not create duplicate financial entries.
+The repository does not yet contain `tally_sync.py`. When the integration is implemented, configure it to validate Tally XML responses, send only the necessary records to Supabase, use idempotent writes, and report sync timestamps and failures without logging secrets.
 
-For a local Python environment, install the dependencies declared by the sync script, then run it from the repository directory:
+For a Windows deployment, prepare a dedicated Python environment and test the script manually first:
 
 ```powershell
 py -3 -m venv .venv
@@ -134,41 +150,41 @@ py -3 -m venv .venv
 python .\tally_sync.py
 ```
 
-Provide script-specific configuration (such as the Tally endpoint and Supabase URL/key) through environment variables or a local, git-ignored configuration file. Do not put service-role keys into a checked-in script.
+Then use **Windows Task Scheduler**:
 
-### Schedule a daily sync on Windows
+1. Create a task with a daily trigger.
+2. Set **Program/script** to the full path to `.venv\Scripts\python.exe`.
+3. Set **Add arguments** to the full path to `tally_sync.py`.
+4. Set **Start in** to the script directory and configure the required environment variables for the task's service account.
+5. Run the task manually and verify its exit code and logs before enabling the schedule.
 
-1. Open **Task Scheduler** and select **Create Task**.
-2. Under **Triggers**, add a daily trigger at the desired time.
-3. Under **Actions**, choose **Start a program**. Set **Program/script** to the full path of the virtual environment's `python.exe` (for example, `C:\path\to\repo\.venv\Scripts\python.exe`).
-4. Set **Add arguments** to the full path of `tally_sync.py`, and **Start in** to the script's directory.
-5. Configure the task to run under a Windows account that can access TallyPrime and the required local environment variables. Run it manually once and inspect its exit code and logs before relying on the schedule.
+Never place a service-role key in the script source, browser bundle, or a checked-in configuration file.
 
-## Folder structure
+## Repository layout
 
 ```text
 tally-client-portal/
 ├── app/
-│   ├── admin/
-│   │   └── page.tsx                 # Company, user, and assignment management
-│   ├── api/
-│   │   └── admin/create-user/
-│   │       └── route.ts             # Admin-authenticated account provisioning
-│   ├── dashboard/                   # Client financial dashboard
-│   ├── employee/                    # Accountant workspace
-│   ├── login/                       # Login and role-based entry
-│   ├── globals.css
-│   └── layout.tsx
-├── components/                      # Shared auth, charts, theme, and UI
-├── lib/                             # Supabase client and shared helpers
+│   ├── admin/page.tsx                 # Company, account, and assignment management
+│   ├── api/admin/create-user/route.ts # Server-side account provisioning
+│   ├── dashboard/page.tsx             # Client financial dashboard (sample chart data)
+│   ├── employee/page.tsx              # Employee's assigned companies and entry status
+│   ├── login/page.tsx                 # Login and role selection
+│   ├── error.tsx                      # Animated route error boundary
+│   ├── loading.tsx                    # Animated loading skeleton
+│   ├── not-found.tsx                  # Executive 404 page
+│   ├── globals.css                    # Global styles and theme variables
+│   └── layout.tsx                     # Root layout and app providers
+├── components/                        # Shared auth, charts, navigation, and UI
+├── lib/                               # Supabase client, theme, and auth helpers
+├── public/                            # Static app assets (favicon only)
 ├── supabase/
-│   └── schema.sql                   # Tables, relationships, and RLS policies
-├── types/                           # Shared TypeScript types
-├── tally_sync.py                    # Optional local integration script (not included yet)
-├── APP_SPEC.md                      # Product and design specification
+│   └── schema.sql                     # Tables, relationships, and RLS policies
+├── types/                             # Shared TypeScript types
+├── APP_SPEC.md                        # Product requirements and design rules
 └── README.md
 ```
 
 ## License
 
-This project is distributed under the MIT License. See [`LICENSE`](./LICENSE) for the complete license text.
+Distributed under the MIT License. See [`LICENSE`](./LICENSE).

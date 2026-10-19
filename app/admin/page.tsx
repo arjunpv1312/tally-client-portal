@@ -12,6 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
 import { AuthGuard } from "@/components/AuthGuard";
 import { getSupabase } from "@/lib/supabase";
@@ -42,11 +43,16 @@ const tabs: { id: Tab; label: string; icon: typeof Building2 }[] = [
 ];
 
 const inputClassName =
-  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100 dark:placeholder:text-slate-500";
+  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 dark:border-[#334155] dark:bg-[#0F172A]/60 dark:text-slate-100 dark:placeholder:text-slate-500";
 const labelClassName =
   "mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300";
 const buttonClassName =
-  "inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#60A5FA] dark:text-slate-950 dark:hover:bg-blue-300";
+
+function displayActionError(message: string, setError: (message: string) => void) {
+  setError(message);
+  toast.error(message);
+}
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -110,10 +116,11 @@ export default function AdminPage() {
         await refreshDirectory();
       } catch (loadError) {
         if (!cancelled) {
-          setError(
+          displayActionError(
             loadError instanceof Error
               ? loadError.message
               : "Unable to load admin data.",
+            setError,
           );
         }
       } finally {
@@ -131,6 +138,7 @@ export default function AdminPage() {
     await refreshDirectory();
     setNotice(message);
     setError("");
+    toast.success(message);
   }
 
   async function createCompany(event: FormEvent<HTMLFormElement>) {
@@ -154,10 +162,11 @@ export default function AdminPage() {
       form.reset();
       await completeAction("Company created successfully.");
     } catch (actionError) {
-      setError(
+      displayActionError(
         actionError instanceof Error
           ? actionError.message
           : "Unable to create the company.",
+        setError,
       );
     } finally {
       setBusy(false);
@@ -207,10 +216,11 @@ export default function AdminPage() {
       setNewUserRole("employee");
       await completeAction("Account created and email confirmed.");
     } catch (actionError) {
-      setError(
+      displayActionError(
         actionError instanceof Error
           ? actionError.message
           : "Unable to create the account.",
+        setError,
       );
     } finally {
       setBusy(false);
@@ -236,10 +246,11 @@ export default function AdminPage() {
       if (deleteError) throw new Error(deleteError.message);
       await completeAction("Company deleted.");
     } catch (actionError) {
-      setError(
+      displayActionError(
         actionError instanceof Error
           ? actionError.message
           : "Unable to delete the company.",
+        setError,
       );
     } finally {
       setBusy(false);
@@ -265,10 +276,11 @@ export default function AdminPage() {
       form.reset();
       await completeAction("Employee assigned to company.");
     } catch (actionError) {
-      setError(
+      displayActionError(
         actionError instanceof Error
           ? actionError.message
           : "Unable to create the assignment.",
+        setError,
       );
     } finally {
       setBusy(false);
@@ -287,10 +299,11 @@ export default function AdminPage() {
       if (deleteError) throw new Error(deleteError.message);
       await completeAction("Assignment removed.");
     } catch (actionError) {
-      setError(
+      displayActionError(
         actionError instanceof Error
           ? actionError.message
           : "Unable to remove the assignment.",
+        setError,
       );
     } finally {
       setBusy(false);
@@ -299,7 +312,7 @@ export default function AdminPage() {
 
   return (
     <AuthGuard allow="admin">
-      <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0F172A]">
+      <div className="min-h-screen bg-white dark:bg-[#0F172A]">
         <AppHeader
           title="Admin Dashboard"
           subtitle="Manage client companies, user access, and team assignments"
@@ -317,13 +330,13 @@ export default function AdminPage() {
             ].map(({ label, value, icon: Icon }) => (
               <div
                 key={label}
-                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#1E293B]"
+                className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]"
               >
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
                     {label}
                   </p>
-                  <Icon className="h-5 w-5 text-blue-600 dark:text-sky-400" />
+                  <Icon className="h-5 w-5 text-blue-600 dark:text-[#60A5FA]" />
                 </div>
                 <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
                   {value}
@@ -332,8 +345,8 @@ export default function AdminPage() {
             ))}
           </section>
 
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#1E293B]">
-            <div className="border-b border-slate-200 px-4 dark:border-slate-800 sm:px-6">
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
+            <div className="border-b border-slate-200 px-4 dark:border-[#334155] sm:px-6">
               <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label="Admin sections">
                 {tabs.map(({ id, label, icon: Icon }) => (
                   <button
@@ -350,7 +363,7 @@ export default function AdminPage() {
                     }}
                     className={`relative flex shrink-0 items-center gap-2 px-4 py-4 text-sm font-medium transition ${
                       activeTab === id
-                        ? "text-blue-700 dark:text-sky-300"
+                        ? "text-blue-700 dark:text-[#60A5FA]"
                         : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
                     }`}
                   >
@@ -359,7 +372,7 @@ export default function AdminPage() {
                     {activeTab === id && (
                       <motion.span
                         layoutId="admin-tab-indicator"
-                        className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-blue-600 dark:bg-sky-400"
+                        className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-blue-600 dark:bg-[#60A5FA]"
                       />
                     )}
                   </button>
@@ -769,9 +782,9 @@ function DataTable({
           {count} {count === 1 ? "record" : "records"}
         </span>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-        <table className="min-w-full divide-y divide-slate-200 text-left text-sm dark:divide-slate-700">
-          <thead className="bg-slate-50 dark:bg-slate-800/60">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
+        <table className="min-w-full divide-y divide-slate-200 text-left text-sm dark:divide-[#334155]">
+          <thead className="bg-slate-50 dark:bg-[#1E293B]">
             <tr>
               {headers.map((header, index) => (
                 <th
@@ -784,7 +797,7 @@ function DataTable({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 bg-white dark:divide-slate-800 dark:bg-[#1E293B]">
+          <tbody className="divide-y divide-slate-100 bg-[#F8FAFC] dark:divide-[#334155] dark:bg-[#1E293B]">
             {count === 0 ? (
               <tr>
                 <td

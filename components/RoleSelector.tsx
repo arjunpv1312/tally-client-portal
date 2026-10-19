@@ -19,12 +19,12 @@ export function RoleSelector({ value, onChange }: RoleSelectorProps) {
 
   return (
     <div
-      className="relative grid grid-cols-3 rounded-xl border border-slate-200 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-800/80"
+      className="relative grid grid-cols-3 rounded-xl border border-slate-200 bg-slate-100/80 p-1 dark:border-[#334155] dark:bg-[#0F172A]/80"
       role="tablist"
       aria-label="Login role"
     >
       <motion.div
-        className="absolute bottom-1 top-1 rounded-lg bg-white shadow-sm dark:bg-slate-700"
+        className="absolute bottom-1 top-1 rounded-lg bg-white shadow-sm dark:bg-[#334155]"
         layout
         transition={{ type: "spring", stiffness: 400, damping: 30 }}
         style={{

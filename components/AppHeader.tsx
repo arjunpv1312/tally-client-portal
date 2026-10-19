@@ -10,7 +10,7 @@ type AppHeaderProps = {
 
 export function AppHeader({ title, subtitle }: AppHeaderProps) {
   return (
-    <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur dark:border-slate-800 dark:bg-[#0F172A]/90">
+    <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-4 backdrop-blur dark:border-[#334155] dark:bg-[#0F172A]/90">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
           {title}

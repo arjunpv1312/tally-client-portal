@@ -16,10 +16,10 @@ export default function DashboardPage() {
 
   return (
     <AuthGuard allow="company">
-    <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0F172A]">
+    <div className="min-h-screen bg-white dark:bg-[#0F172A]">
       <AppHeader
         title="Financial Overview"
-        subtitle="Read-only analytics synced from Tally (demo data until Supabase is connected)"
+        subtitle="Read-only analytics · Sample data until a sync integration is connected"
       />
       <motion.main
         initial={{ opacity: 0, y: 12 }}
@@ -44,7 +44,7 @@ export default function DashboardPage() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.06 }}
-              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#1E293B]"
+              className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]"
             >
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 {stat.label}
@@ -56,21 +56,21 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#1E293B]">
+        <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
           <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-50">
             Sales vs Expenses
           </h2>
           <SalesExpensesBarChart data={data} />
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#1E293B]">
+        <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
           <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-50">
             Net Profit Trend
           </h2>
           <NetProfitAreaChart data={data} />
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#1E293B]">
+        <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
           <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-50">
             GST Summary
           </h2>
