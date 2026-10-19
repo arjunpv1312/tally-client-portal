@@ -12,6 +12,8 @@ export interface Company {
   id: string;
   name: string;
   gstin: string | null;
+  email?: string | null;
+  phone?: string | null;
   created_at?: string;
 }
 
