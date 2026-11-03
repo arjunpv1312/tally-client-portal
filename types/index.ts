@@ -8,23 +8,6 @@ export interface Profile {
   created_at?: string;
 }
 
-export interface Company {
-  id: string;
-  name: string;
-  gstin: string | null;
-  email?: string | null;
-  phone?: string | null;
-  created_at?: string;
-}
-
-export interface EmployeeCompanyAssignment {
-  id: string;
-  employee_id: string;
-  company_id: string;
-  entry_status: "pending" | "in_progress" | "complete";
-  company?: Company;
-}
-
 export interface VoucherSummary {
   period: string;
   sales: number;

@@ -55,9 +55,60 @@ create table if not exists public.company_employees (
   unique (employee_id, company_id)
 );
 
+alter table public.company_employees
+  add column if not exists entry_status text not null default 'pending';
+
+create table if not exists public.vouchers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  tally_voucher_id text not null,
+  voucher_number text,
+  voucher_type text not null
+    check (voucher_type in ('sales', 'purchase', 'receipt', 'payment')),
+  voucher_date date not null,
+  party_name text,
+  total_amount numeric(18, 2) not null default 0,
+  sales_amount numeric(18, 2) not null default 0,
+  purchase_amount numeric(18, 2) not null default 0,
+  expense_amount numeric(18, 2) not null default 0,
+  cgst_amount numeric(18, 2) not null default 0,
+  sgst_amount numeric(18, 2) not null default 0,
+  igst_amount numeric(18, 2) not null default 0,
+  raw_ledger_entries jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (company_id, tally_voucher_id)
+);
+
+create table if not exists public.financial_summaries (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  period_start date not null,
+  period_end date not null,
+  total_sales numeric(18, 2) not null default 0,
+  total_purchases numeric(18, 2) not null default 0,
+  total_expenses numeric(18, 2) not null default 0,
+  net_profit numeric(18, 2) not null default 0,
+  gst_payable numeric(18, 2) not null default 0,
+  gst_input numeric(18, 2) not null default 0,
+  last_synced_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (company_id, period_start),
+  check (period_end >= period_start)
+);
+
+create index if not exists vouchers_company_date_idx
+  on public.vouchers (company_id, voucher_date desc);
+
+create index if not exists financial_summaries_company_period_idx
+  on public.financial_summaries (company_id, period_start);
+
 alter table public.profiles enable row level security;
 alter table public.companies enable row level security;
 alter table public.company_employees enable row level security;
+alter table public.vouchers enable row level security;
+alter table public.financial_summaries enable row level security;
 
 create or replace function public.is_admin()
 returns boolean
@@ -132,6 +183,48 @@ create policy "Admins can manage company assignments"
   to authenticated
   using (public.is_admin())
   with check (public.is_admin());
+
+drop policy if exists "Users can read authorized company vouchers" on public.vouchers;
+create policy "Users can read authorized company vouchers"
+  on public.vouchers
+  for select
+  to authenticated
+  using (
+    public.is_admin()
+    or exists (
+      select 1
+      from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.company_id = vouchers.company_id
+    )
+    or exists (
+      select 1
+      from public.company_employees
+      where company_employees.company_id = vouchers.company_id
+        and company_employees.employee_id = auth.uid()
+    )
+  );
+
+drop policy if exists "Users can read authorized financial summaries" on public.financial_summaries;
+create policy "Users can read authorized financial summaries"
+  on public.financial_summaries
+  for select
+  to authenticated
+  using (
+    public.is_admin()
+    or exists (
+      select 1
+      from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.company_id = financial_summaries.company_id
+    )
+    or exists (
+      select 1
+      from public.company_employees
+      where company_employees.company_id = financial_summaries.company_id
+        and company_employees.employee_id = auth.uid()
+    )
+  );
 
 -- Create the first admin in Supabase Auth, then insert its matching profile:
 -- insert into public.profiles (id, email, full_name, role)

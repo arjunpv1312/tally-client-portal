@@ -35,7 +35,12 @@ export function SalesExpensesBarChart({ data }: FinancialChartsProps) {
           <Tooltip contentStyle={chartTooltipStyle} />
           <Legend />
           <Bar dataKey="sales" name="Sales" fill="#2563EB" radius={[6, 6, 0, 0]} />
-          <Bar dataKey="expenses" name="Expenses" fill="#94A3B8" radius={[6, 6, 0, 0]} />
+          <Bar
+            dataKey="expenses"
+            name="Purchases & Expenses"
+            fill="#94A3B8"
+            radius={[6, 6, 0, 0]}
+          />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -94,38 +99,3 @@ export function GstSummaryBarChart({ data }: FinancialChartsProps) {
     </div>
   );
 }
-
-export const demoFinancialData: VoucherSummary[] = [
-  {
-    period: "Apr",
-    sales: 420000,
-    expenses: 280000,
-    net_profit: 140000,
-    gst_payable: 32000,
-    gst_input: 18000,
-  },
-  {
-    period: "May",
-    sales: 510000,
-    expenses: 310000,
-    net_profit: 200000,
-    gst_payable: 38000,
-    gst_input: 21000,
-  },
-  {
-    period: "Jun",
-    sales: 480000,
-    expenses: 295000,
-    net_profit: 185000,
-    gst_payable: 35000,
-    gst_input: 19500,
-  },
-  {
-    period: "Jul",
-    sales: 560000,
-    expenses: 330000,
-    net_profit: 230000,
-    gst_payable: 41000,
-    gst_input: 22000,
-  },
-];

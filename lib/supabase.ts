@@ -1,3 +1,4 @@
+import { createBrowserClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { UserRole } from "@/types";
 
@@ -20,32 +21,22 @@ export function getSupabase(): SupabaseClient {
     );
   }
 
-  const options = {
-    auth: {
-      persistSession: typeof window !== "undefined",
-      autoRefreshToken: typeof window !== "undefined",
-      detectSessionInUrl: typeof window !== "undefined",
-    },
-  };
-
   if (typeof window === "undefined") {
-    return createClient(supabaseUrl, supabaseAnonKey, options);
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
   }
 
   if (!browserClient) {
-    browserClient = createClient(supabaseUrl, supabaseAnonKey, options);
+    browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
   }
 
   return browserClient;
 }
-
-export const supabase = {
-  get auth() {
-    return getSupabase().auth;
-  },
-  from: (...args: Parameters<SupabaseClient["from"]>) =>
-    getSupabase().from(...args),
-};
 
 export async function fetchProfileRole(
   userId: string,
@@ -56,6 +47,9 @@ export async function fetchProfileRole(
     .eq("id", userId)
     .maybeSingle();
 
-  if (error || !data?.role) return null;
-  return data.role as UserRole;
+  if (error) return null;
+  const role = data?.role;
+  return role === "admin" || role === "employee" || role === "company"
+    ? role
+    : null;
 }

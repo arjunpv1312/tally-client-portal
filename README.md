@@ -13,9 +13,9 @@
 
 Tally Client Reporting Portal is a cloud reporting workspace for accounting practices and their clients. A trusted machine can read accounting data from desktop TallyPrime over its local XML/HTTP interface and send validated records to Supabase. The Next.js portal then provides a separate, role-aware experience for administrators, employees, and client companies.
 
-The web application includes administrator-managed company and account directories, employee-to-company assignments, authentication, and a read-only financial dashboard. Supabase Row Level Security (RLS) is the database access boundary; the browser never connects directly to TallyPrime.
+The web application includes administrator-managed company and account directories, employee-to-company assignments, authentication, and a read-only financial dashboard. Supabase Row Level Security (RLS) is the database access boundary; the browser never connects directly to TallyPrime. Supabase SSR cookies and the Next.js `proxy.ts` convention provide authenticated, role-checked access to protected route paths, while RLS remains authoritative for database access.
 
-> **Integration status:** The portal and Supabase schema are present. A `tally_sync.py` integration script and financial reporting tables are **not included yet**. Dashboard charts currently display clearly identified sample data until a sync pipeline and production financial-data schema are connected.
+> The portal includes a local `tally_sync.py` worker and schema for vouchers and monthly summaries. Configure the sync environment and apply the updated schema before connecting a live TallyPrime company.
 
 ## System architecture
 
@@ -23,7 +23,7 @@ The web application includes administrator-managed company and account directori
   ACCOUNTING DATA PATH
   +-------------------------+     XML / HTTP :9000     +---------------------------+
   | Desktop TallyPrime      | -----------------------> | Trusted local sync worker  |
-  | Company books + ledgers |                          | tally_sync.py (to be added)|
+  | Company books + ledgers |                            | tally_sync.py              |
   +-------------------------+                          +-------------+-------------+
                                                                     |
                                                    HTTPS / Supabase | API
@@ -72,7 +72,7 @@ The login screen asks the user to select Admin, Employee, or Client. The selecte
 | Database | Supabase PostgreSQL with Row Level Security |
 | Authentication | Supabase Auth; administrator-provisioned accounts |
 | Charts | Recharts sales, expense, profit, and GST visualizations |
-| Sync engine | TallyPrime XML/HTTP on port `9000`; Python worker planned, not yet present |
+| Sync engine | Python standard library, TallyPrime XML/HTTP on port `9000`, Supabase REST upserts |
 
 ## Quickstart
 
@@ -80,7 +80,7 @@ The login screen asks the user to select Admin, Employee, or Client. The selecte
 
 - Node.js LTS and npm
 - A Supabase project with access to its SQL Editor
-- TallyPrime and Python 3 only when configuring the optional local integration
+- TallyPrime and Python 3.10+ only when configuring the local integration
 
 ### 1. Clone and install
 
@@ -105,7 +105,7 @@ The browser uses the public project URL and anon/publishable key. The service-ro
 ### 3. Initialize Supabase
 
 1. Open the Supabase project **SQL Editor**.
-2. Run [`supabase/schema.sql`](./supabase/schema.sql). It creates the profile, company, and employee-assignment structures and configures RLS policies.
+2. Run [`supabase/schema.sql`](./supabase/schema.sql). It creates profile, company, employee-assignment, voucher, and financial-summary structures and configures RLS policies. Re-running the SQL safely adds the reporting tables and policies.
 3. In **Authentication → Users**, create the first administrator.
 4. Copy the new Auth user's UUID, then run the bootstrap `INSERT` at the end of `schema.sql` with that UUID, email, and an administrator display name.
 5. Sign in at `/login` using the Admin role tab.
@@ -138,25 +138,39 @@ npm run build
 4. Ensure the local firewall permits the intended sync process. Do **not** port-forward this listener or expose it to the public internet.
 5. Validate the request and XML response locally before connecting any uploader.
 
-### Schedule `tally_sync.py` when available
+### Configure and run `tally_sync.py`
 
-The repository does not yet contain `tally_sync.py`. When the integration is implemented, configure it to validate Tally XML responses, send only the necessary records to Supabase, use idempotent writes, and report sync timestamps and failures without logging secrets.
-
-For a Windows deployment, prepare a dedicated Python environment and test the script manually first:
+Set these variables in the sync process environment. Keep the service-role key secret and use a database company UUID from the `companies` table.
 
 ```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python .\tally_sync.py
+$env:SUPABASE_URL = "https://<project-ref>.supabase.co"
+$env:SUPABASE_SERVICE_ROLE_KEY = "<server-only-service-role-key>"
+$env:TALLY_COMPANY_ID = "<company-uuid>"
+$env:TALLY_COMPANY_NAME = "<exact-company-name-in-TallyPrime>"
+$env:TALLY_EXPENSE_LEDGER_NAMES = "Office Rent,Professional Fees"
 ```
 
-Then use **Windows Task Scheduler**:
+`TALLY_EXPENSE_LEDGER_NAMES` is an explicit comma-separated allowlist of Tally ledgers used to classify payment entries as expenses. Payment vouchers are **not** assumed to be expenses because they may settle purchases or liabilities. Configure the ledger names to match the Tally company; otherwise payment expense totals remain zero. Purchase amounts are reported separately from classified payment expenses to avoid automatically double-counting purchase settlements.
 
-1. Create a task with a daily trigger.
-2. Set **Program/script** to the full path to `.venv\Scripts\python.exe`.
-3. Set **Add arguments** to the full path to `tally_sync.py`.
-4. Set **Start in** to the script directory and configure the required environment variables for the task's service account.
-5. Run the task manually and verify its exit code and logs before enabling the schedule.
+Optional range and network controls are `TALLY_SYNC_FROM_DATE` (`YYYY-MM-DD`, defaults to the current Indian financial-year start), `TALLY_SYNC_TO_DATE` (defaults to today), `TALLY_SYNC_RETRIES` (defaults to 3), and `TALLY_SYNC_TIMEOUT` (defaults to 30 seconds).
+
+Run the sync manually after enabling Tally's local XML/HTTP listener:
+
+```powershell
+py -3 .\tally_sync.py
+```
+
+The worker exports the Day Book from `http://localhost:9000`, validates XML and dates, upserts vouchers on `(company_id, tally_voucher_id)`, then upserts monthly summaries. Network failures are retried; credentials and voucher payloads are not printed to logs. Set the environment variables for the same Windows account that runs the scheduled task.
+
+Register a daily 3:00 AM Task Scheduler job from PowerShell:
+
+```powershell
+.\scripts\schedule_sync.ps1
+```
+
+The generated task uses the current user's `python` executable. For scheduled runs, configure persistent user-level environment variables for the same Windows account (rather than only setting variables in a temporary PowerShell session). Review the task and run it manually once before relying on the schedule.
+
+The financial summary is calculated from sales and purchase voucher net amounts, tax ledger lines containing `CGST`, `SGST`, and `IGST`, and only the explicitly configured payment-expense ledgers. Validate the Tally Day Book export and ledger mapping against company books before using the figures for statutory reporting.
 
 Never place a service-role key in the script source, browser bundle, or a checked-in configuration file.
 
@@ -167,7 +181,7 @@ tally-client-portal/
 ├── app/
 │   ├── admin/page.tsx                 # Company, account, and assignment management
 │   ├── api/admin/create-user/route.ts # Server-side account provisioning
-│   ├── dashboard/page.tsx             # Client financial dashboard (sample chart data)
+│   ├── dashboard/page.tsx             # Client financial dashboard (live Supabase data)
 │   ├── employee/page.tsx              # Employee's assigned companies and entry status
 │   ├── login/page.tsx                 # Login and role selection
 │   ├── error.tsx                      # Animated route error boundary
@@ -177,9 +191,13 @@ tally-client-portal/
 │   └── layout.tsx                     # Root layout and app providers
 ├── components/                        # Shared auth, charts, navigation, and UI
 ├── lib/                               # Supabase client, theme, and auth helpers
+├── proxy.ts                           # SSR session refresh and role-gated routes
 ├── public/                            # Static app assets (favicon only)
+├── scripts/                           # Windows sync scheduling
 ├── supabase/
 │   └── schema.sql                     # Tables, relationships, and RLS policies
+├── tally_sync.py                      # TallyPrime to Supabase sync worker
+├── tests/test_tally_sync.py            # XML parsing and summary tests
 ├── types/                             # Shared TypeScript types
 ├── APP_SPEC.md                        # Product requirements and design rules
 └── README.md

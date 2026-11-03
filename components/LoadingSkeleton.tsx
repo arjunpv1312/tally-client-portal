@@ -13,7 +13,7 @@ export function SpinnerRing({ className = "" }: { className?: string }) {
         className="absolute inset-0 rounded-full border-2 border-slate-200 dark:border-[#334155]"
       />
       <motion.span
-        className="absolute inset-0 rounded-full border-2 border-transparent border-t-blue-600 dark:border-t-sky-400"
+        className="absolute inset-0 rounded-full border-2 border-transparent border-t-blue-600 dark:border-t-[#60A5FA]"
         animate={{ rotate: 360 }}
         transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
       />
