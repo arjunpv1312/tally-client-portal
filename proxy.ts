@@ -56,29 +56,36 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) {
-    return redirectWithCookies(request, response, "/login");
-  }
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      return redirectWithCookies(request, response, "/login");
+    }
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", userData.user.id)
-    .maybeSingle();
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", userData.user.id)
+      .maybeSingle();
 
-  if (profileError || !isUserRole(profile?.role)) {
-    return redirectWithCookies(request, response, "/login");
-  }
+    if (profileError || !isUserRole(profile?.role)) {
+      return redirectWithCookies(request, response, "/login");
+    }
 
-  const allowedPath = protectedRoutes[profile.role];
-  if (
-    request.nextUrl.pathname !== allowedPath &&
-    !request.nextUrl.pathname.startsWith(`${allowedPath}/`)
-  ) {
-    return redirectWithCookies(request, response, allowedPath);
+    const allowedPath = protectedRoutes[profile.role];
+    if (
+      request.nextUrl.pathname !== allowedPath &&
+      !request.nextUrl.pathname.startsWith(`${allowedPath}/`)
+    ) {
+      return redirectWithCookies(request, response, allowedPath);
+    }
+    return response;
+  } catch {
+    return NextResponse.json(
+      { error: "Access verification is temporarily unavailable. Please try again." },
+      { status: 503 },
+    );
   }
-  return response;
 }
 
 export const config = {

@@ -5,15 +5,17 @@ import {
   Building2,
   Check,
   ClipboardList,
-  LoaderCircle,
+  Loader2,
   Plus,
   Trash2,
   UserPlus,
+  UserRoundX,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
+import { AdminSkeleton } from "@/components/admin/AdminSkeleton";
 import { AuthGuard } from "@/components/AuthGuard";
 import { getBrowserSupabase } from "@/lib/supabase";
 import type { Profile, UserRole } from "@/types";
@@ -32,6 +34,7 @@ type Assignment = {
   employee_id: string;
   company_id: string;
   created_at: null;
+  entry_status: string;
 };
 
 type Tab = "companies" | "users" | "assignments";
@@ -48,7 +51,35 @@ const inputClassName =
 const labelClassName =
   "mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300";
 const buttonClassName =
-  "inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#60A5FA] dark:text-slate-950 dark:hover:bg-blue-300";
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-lg active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-sm dark:bg-[#60A5FA] dark:text-slate-950 dark:hover:bg-blue-300";
+const rowActionClassName =
+  "inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 transition-all duration-200 hover:-translate-y-0.5 hover:bg-rose-50 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 dark:text-rose-300 dark:hover:bg-rose-950/40";
+
+async function callAdminApi(
+  pathname: string,
+  payload: Record<string, string>,
+): Promise<void> {
+  const { data, error } = await getBrowserSupabase().auth.getSession();
+  if (error) throw new Error(error.message);
+  const accessToken = data.session?.access_token;
+  if (!accessToken) throw new Error("Your admin session has expired. Sign in again.");
+
+  const response = await fetch(pathname, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const result = (await response.json()) as {
+    success?: boolean;
+    error?: string;
+  };
+  if (!response.ok || !result.success) {
+    throw new Error(result.error ?? "The admin action could not be completed.");
+  }
+}
 
 function displayActionError(message: string, setError: (message: string) => void) {
   setError(message);
@@ -73,12 +104,12 @@ export default function AdminPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [newUserRole, setNewUserRole] = useState<"employee" | "company">(
-    "employee",
-  );
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [newUserRole, setNewUserRole] = useState<UserRole>("employee");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [directoryErrors, setDirectoryErrors] = useState<DirectoryErrors>({});
+  const [assignmentWarning, setAssignmentWarning] = useState("");
 
   const employees = useMemo(
     () => profiles.filter((profile) => profile.role === "employee"),
@@ -86,27 +117,54 @@ export default function AdminPage() {
   );
   const refreshDirectory = useCallback(async () => {
     const supabase = getBrowserSupabase();
-    const [companyResult, profileResult, initialAssignmentResult] = await Promise.all([
+    const [companyResult, profileResult] = await Promise.all([
       supabase
         .from("companies")
         .select("id, name, gstin, email, phone, created_at")
         .order("name"),
       supabase
         .from("profiles")
-        .select("id, email, full_name, role, created_at")
+        .select("id, email, full_name, role, company_id, created_at")
         .order("created_at", { ascending: false }),
-      supabase
-        .from("company_employees")
-        .select("id, company_id, user_id")
-        .order("id"),
     ]);
 
-    const assignmentResult = initialAssignmentResult.error
-      ? await supabase
+    const assignmentQuery = (columns: string) =>
+      supabase
         .from("company_employees")
-        .select("id, company_id, employee_id")
+        .select(columns)
         .order("id")
-      : initialAssignmentResult;
+        .returns<
+          {
+            id: string;
+            company_id: string;
+            user_id?: string | null;
+            employee_id?: string | null;
+            entry_status?: string | null;
+          }[]
+        >();
+    const assignmentVariants = [
+      "id, company_id, user_id, entry_status",
+      "id, company_id, employee_id, entry_status",
+      "id, company_id, user_id",
+      "id, company_id, employee_id",
+    ];
+    let assignmentResult = await assignmentQuery(assignmentVariants[0]);
+    let hasStatusColumn = true;
+    if (assignmentResult.error) {
+      assignmentResult = await assignmentQuery(assignmentVariants[1]);
+    }
+    if (assignmentResult.error) {
+      hasStatusColumn = false;
+      assignmentResult = await assignmentQuery(assignmentVariants[2]);
+    }
+    if (assignmentResult.error) {
+      assignmentResult = await assignmentQuery(assignmentVariants[3]);
+    }
+    setAssignmentWarning(
+      !assignmentResult.error && !hasStatusColumn
+        ? "The entry_status column is unavailable; assignments are shown as Active until the schema is updated."
+        : "",
+    );
 
     setDirectoryErrors({
       ...(companyResult.error
@@ -126,12 +184,14 @@ export default function AdminPage() {
           company_id: string;
           user_id?: string | null;
           employee_id?: string | null;
+          entry_status?: string | null;
         };
         return {
           id: row.id,
           company_id: row.company_id,
           employee_id: row.user_id ?? row.employee_id ?? "",
           created_at: null,
+          entry_status: row.entry_status || "active",
         };
       }),
     );
@@ -145,11 +205,10 @@ export default function AdminPage() {
         await refreshDirectory();
       } catch (loadError) {
         if (!cancelled) {
-          displayActionError(
+          setError(
             loadError instanceof Error
               ? loadError.message
-              : "Unable to load admin data.",
-            setError,
+              : "Unable to load admin data. Check your connection and Supabase access policies, then reload.",
           );
         }
       } finally {
@@ -174,6 +233,7 @@ export default function AdminPage() {
     event.preventDefault();
     const form = event.currentTarget;
     setBusy(true);
+    setPendingAction("company");
     setError("");
     setNotice("");
 
@@ -199,18 +259,20 @@ export default function AdminPage() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
+    setPendingAction("account");
     setError("");
     setNotice("");
 
     const form = event.currentTarget;
     const formData = new FormData(form);
-    const role = String(formData.get("role")) as "employee" | "company";
+    const role = String(formData.get("role")) as UserRole;
     try {
       const { data: sessionData, error: sessionError } =
         await getBrowserSupabase().auth.getSession();
@@ -252,6 +314,7 @@ export default function AdminPage() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
@@ -264,6 +327,7 @@ export default function AdminPage() {
       return;
     }
     setBusy(true);
+    setPendingAction("company-delete");
     setError("");
     setNotice("");
     try {
@@ -282,6 +346,7 @@ export default function AdminPage() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
@@ -289,6 +354,7 @@ export default function AdminPage() {
     event.preventDefault();
     const form = event.currentTarget;
     setBusy(true);
+    setPendingAction("assignment");
     setError("");
     setNotice("");
 
@@ -341,20 +407,24 @@ export default function AdminPage() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function removeAssignment(assignment: Assignment) {
+    if (!window.confirm("Revoke this employee's access to the selected company?")) {
+      return;
+    }
+
     setBusy(true);
+    setPendingAction("assignment-revoke");
     setError("");
     setNotice("");
     try {
-      const { error: deleteError } = await getBrowserSupabase()
-        .from("company_employees")
-        .delete()
-        .eq("id", assignment.id);
-      if (deleteError) throw new Error(deleteError.message);
-      await completeAction("Assignment removed.");
+      await callAdminApi("/api/admin/revoke-access", {
+        assignment_id: assignment.id,
+      });
+      await completeAction("Assignment revoked.");
     } catch (actionError) {
       displayActionError(
         actionError instanceof Error
@@ -364,7 +434,72 @@ export default function AdminPage() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
+  }
+
+  async function revokeUserAccess(profile: Profile) {
+    const scope = profile.company_id
+      ? ` from ${companies.find((company) => company.id === profile.company_id)?.name ?? "the linked company"}`
+      : " from all assigned companies";
+    if (!window.confirm(`Revoke ${profile.full_name || profile.email}'s access${scope}?`)) {
+      return;
+    }
+
+    setBusy(true);
+    setPendingAction("access-revoke");
+    setError("");
+    setNotice("");
+    try {
+      await callAdminApi("/api/admin/revoke-access", {
+        user_id: profile.id,
+        ...(profile.company_id ? { company_id: profile.company_id } : {}),
+      });
+      await completeAction("Company access revoked.");
+    } catch (actionError) {
+      displayActionError(
+        actionError instanceof Error
+          ? actionError.message
+          : "Unable to revoke company access.",
+        setError,
+      );
+    } finally {
+      setBusy(false);
+      setPendingAction(null);
+    }
+  }
+
+  async function deleteUser(profile: Profile) {
+    if (!window.confirm(`Permanently delete ${profile.full_name || profile.email}'s account?`)) {
+      return;
+    }
+
+    setBusy(true);
+    setPendingAction("user-delete");
+    setError("");
+    setNotice("");
+    try {
+      await callAdminApi("/api/admin/delete-user", { user_id: profile.id });
+      await completeAction("User account deleted.");
+    } catch (actionError) {
+      displayActionError(
+        actionError instanceof Error
+          ? actionError.message
+          : "Unable to delete the user account.",
+        setError,
+      );
+    } finally {
+      setBusy(false);
+      setPendingAction(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <AuthGuard allow="admin">
+        <AdminSkeleton />
+      </AuthGuard>
+    );
   }
 
   return (
@@ -387,7 +522,7 @@ export default function AdminPage() {
             ].map(({ label, value, icon: Icon }) => (
               <div
                 key={label}
-                className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]"
+                className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg active:translate-y-0 dark:border-[#334155] dark:bg-[#1E293B] dark:hover:border-[#60A5FA]/40"
               >
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -455,14 +590,8 @@ export default function AdminPage() {
                   {notice}
                 </div>
               )}
-              {loading ? (
-                <div className="flex min-h-48 items-center justify-center text-slate-500">
-                  <LoaderCircle className="h-5 w-5 animate-spin" />
-                  <span className="ml-2 text-sm">Loading admin workspace…</span>
-                </div>
-              ) : (
-                <AnimatePresence mode="wait">
-                  <motion.div
+              <AnimatePresence mode="wait">
+                <motion.div
                     key={activeTab}
                     id={`${activeTab}-panel`}
                     role="tabpanel"
@@ -525,12 +654,14 @@ export default function AdminPage() {
                             </label>
                             <div className="sm:col-span-2 lg:col-span-4">
                               <button className={buttonClassName} disabled={busy}>
-                                {busy ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                {pendingAction === "company" ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
                                   <Plus className="h-4 w-4" />
                                 )}
-                                Add company
+                                {pendingAction === "company"
+                                  ? "Creating Company..."
+                                  : "Add company"}
                               </button>
                             </div>
                           </form>
@@ -542,7 +673,7 @@ export default function AdminPage() {
                           emptyText="No companies have been added yet."
                         >
                           {companies.map((company) => (
-                            <tr key={company.id}>
+                            <tr key={company.id} className="transition-colors hover:bg-white dark:hover:bg-[#0F172A]/40">
                               <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                                 {company.name}
                               </td>
@@ -569,7 +700,11 @@ export default function AdminPage() {
                                   onClick={() => void deleteCompany(company)}
                                   className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  {pendingAction === "company-delete" ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
                                 </button>
                               </td>
                             </tr>
@@ -631,14 +766,11 @@ export default function AdminPage() {
                                 className={inputClassName}
                                 name="role"
                                 value={newUserRole}
-                                onChange={(event) =>
-                                  setNewUserRole(
-                                    event.target.value as "employee" | "company",
-                                  )
-                                }
+                                onChange={(event) => setNewUserRole(event.target.value as UserRole)}
                               >
+                                <option value="admin">Admin</option>
                                 <option value="employee">Employee</option>
-                                <option value="company">Client company</option>
+                                <option value="company">Company / Client</option>
                               </select>
                             </label>
                             <label>
@@ -667,12 +799,14 @@ export default function AdminPage() {
                             </label>
                             <div className="flex items-end">
                               <button className={buttonClassName} disabled={busy}>
-                                {busy ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                {pendingAction === "account" ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
                                   <UserPlus className="h-4 w-4" />
                                 )}
-                                Create account
+                                {pendingAction === "account"
+                                  ? "Provisioning Account..."
+                                  : "Create account"}
                               </button>
                             </div>
                           </form>
@@ -680,11 +814,11 @@ export default function AdminPage() {
                         <DataTable
                           title="User directory"
                           count={profiles.length}
-                          headers={["User", "Email", "Role", "Created", "Status"]}
+                          headers={["User", "Email", "Role", "Created", "Status", "Actions"]}
                           emptyText="No user profiles have been created yet."
                         >
                           {profiles.map((profile) => (
-                            <tr key={profile.id}>
+                            <tr key={profile.id} className="transition-colors hover:bg-white dark:hover:bg-[#0F172A]/40">
                               <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                                 {profile.full_name || "—"}
                               </td>
@@ -705,6 +839,42 @@ export default function AdminPage() {
                                   Active
                                 </span>
                               </td>
+                              <td className="px-4 py-3">
+                                <div className="flex flex-wrap gap-1">
+                                  {profile.role !== "admin" && (
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => void revokeUserAccess(profile)}
+                                      className={rowActionClassName}
+                                    >
+                                      {pendingAction === "access-revoke" ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <UserRoundX className="h-3.5 w-3.5" />
+                                      )}
+                                      {pendingAction === "access-revoke"
+                                        ? "Revoking Access..."
+                                        : "Revoke access"}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => void deleteUser(profile)}
+                                    className={rowActionClassName}
+                                  >
+                                    {pendingAction === "user-delete" ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    )}
+                                    {pendingAction === "user-delete"
+                                      ? "Deleting Account..."
+                                      : "Delete account"}
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </DataTable>
@@ -714,6 +884,7 @@ export default function AdminPage() {
                     {activeTab === "assignments" && (
                       <div className="space-y-7">
                         <DirectoryError message={directoryErrors.assignments} />
+                        <DirectoryError message={assignmentWarning} />
                         <div>
                           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                             Assign an employee
@@ -766,12 +937,14 @@ export default function AdminPage() {
                                 className={buttonClassName}
                                 disabled={busy || employees.length === 0 || companies.length === 0}
                               >
-                                {busy ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                {pendingAction === "assignment" ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
                                   <Plus className="h-4 w-4" />
                                 )}
-                                Create assignment
+                                {pendingAction === "assignment"
+                                  ? "Creating Assignment..."
+                                  : "Create assignment"}
                               </button>
                             </div>
                           </form>
@@ -779,7 +952,7 @@ export default function AdminPage() {
                         <DataTable
                           title="Current assignments"
                           count={assignments.length}
-                          headers={["Employee", "Company", "Assigned", ""]}
+                          headers={["Employee", "Company", "Entry status", "Actions"]}
                           emptyText="No employee-company assignments yet."
                         >
                           {assignments.map((assignment) => {
@@ -790,7 +963,7 @@ export default function AdminPage() {
                               (item) => item.id === assignment.company_id,
                             );
                             return (
-                              <tr key={assignment.id}>
+                              <tr key={assignment.id} className="transition-colors hover:bg-white dark:hover:bg-[#0F172A]/40">
                                 <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                                   {employee?.full_name || employee?.email || "Unknown employee"}
                                 </td>
@@ -798,19 +971,45 @@ export default function AdminPage() {
                                   {company?.name || "Unknown company"}
                                 </td>
                                 <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                                  {formatDate(assignment.created_at)}
+                                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium capitalize text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                    {assignment.entry_status}
+                                  </span>
                                 </td>
                                 <td className="px-4 py-3 text-right">
-                                  <button
-                                    type="button"
-                                    title="Unassign employee"
-                                    aria-label="Unassign employee"
-                                    disabled={busy}
-                                    onClick={() => void removeAssignment(assignment)}
-                                    className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
+                                  <div className="flex justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => void removeAssignment(assignment)}
+                                      className={rowActionClassName}
+                                    >
+                                      {pendingAction === "assignment-revoke" ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <UserRoundX className="h-3.5 w-3.5" />
+                                      )}
+                                      {pendingAction === "assignment-revoke"
+                                        ? "Revoking Access..."
+                                        : "Revoke"}
+                                    </button>
+                                    {employee && (
+                                      <button
+                                        type="button"
+                                        disabled={busy}
+                                        onClick={() => void deleteUser(employee)}
+                                        className={rowActionClassName}
+                                      >
+                                        {pendingAction === "user-delete" ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        )}
+                                        {pendingAction === "user-delete"
+                                          ? "Deleting Account..."
+                                          : "Delete account"}
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -818,9 +1017,8 @@ export default function AdminPage() {
                         </DataTable>
                       </div>
                     )}
-                  </motion.div>
-                </AnimatePresence>
-              )}
+                </motion.div>
+              </AnimatePresence>
             </div>
           </section>
         </main>
@@ -893,7 +1091,7 @@ function DirectoryError({ message }: { message?: string }) {
       role="alert"
       className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
     >
-      This section could not be loaded: {message}
+      Admin data warning: {message}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { DashboardContentSkeleton } from "@/components/dashboard/DashboardSkeleton";
 
 export function SpinnerRing({ className = "" }: { className?: string }) {
   return (
@@ -35,15 +36,5 @@ export function GlassSkeleton({ className = "" }: { className?: string }) {
 }
 
 export function DashboardLoadingSkeleton() {
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[1, 2, 3].map((i) => (
-          <GlassSkeleton key={i} className="h-24" />
-        ))}
-      </div>
-      <GlassSkeleton className="h-72" />
-      <GlassSkeleton className="h-56" />
-    </div>
-  );
+  return <DashboardContentSkeleton />;
 }

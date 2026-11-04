@@ -2,11 +2,10 @@
 
 import { FormEvent, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Lock, LogIn, Mail } from "lucide-react";
+import { Loader2, Lock, LogIn, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { RoleSelector } from "@/components/RoleSelector";
-import { SpinnerRing } from "@/components/LoadingSkeleton";
 import { redirectPathForRole, tabToExpectedRole } from "@/lib/auth-redirect";
 import {
   fetchProfileRole,
@@ -102,7 +101,7 @@ export function LoginForm() {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35 }}
-      className="w-full max-w-md space-y-6 rounded-xl border border-slate-200 bg-[#F8FAFC] p-8 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]"
+      className="w-full max-w-md space-y-6 rounded-xl border border-slate-200 bg-[#F8FAFC] p-8 shadow-sm transition-all duration-200 hover:shadow-lg dark:border-[#334155] dark:bg-[#1E293B]"
     >
       <div className="space-y-1 text-center">
         <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">
@@ -171,12 +170,12 @@ export function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-[#60A5FA] dark:text-slate-950 dark:hover:bg-blue-300"
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-500 hover:shadow-lg active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-sm dark:bg-[#60A5FA] dark:text-slate-950 dark:hover:bg-blue-300"
       >
         {loading ? (
           <>
-            <SpinnerRing className="h-5 w-5 [&_span]:border-t-white" />
-            Signing in…
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Logging in...
           </>
         ) : (
           <>

@@ -6,8 +6,8 @@ import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
 import { AuthGuard } from "@/components/AuthGuard";
 import {
-  DashboardLoadingSkeleton,
-} from "@/components/LoadingSkeleton";
+  DashboardContentSkeleton,
+} from "@/components/dashboard/DashboardSkeleton";
 import {
   GstSummaryBarChart,
   NetProfitAreaChart,
@@ -18,15 +18,25 @@ import { getSupabase } from "@/lib/supabase";
 import type { VoucherSummary } from "@/types";
 
 type SummaryRow = {
+  id?: string;
   period_start: string;
   period_end: string;
   total_sales: number | string;
   total_purchases: number | string;
   total_expenses: number | string;
   net_profit: number | string;
+  cash_in_hand?: number | string | null;
+  bank_balance?: number | string | null;
   gst_payable: number | string;
   gst_input: number | string;
-  last_synced_at: string;
+  cgst_payable?: number | string | null;
+  sgst_payable?: number | string | null;
+  igst_payable?: number | string | null;
+  cgst_amount?: number | string | null;
+  sgst_amount?: number | string | null;
+  igst_amount?: number | string | null;
+  updated_at?: string | null;
+  last_synced_at?: string | null;
 };
 
 type VoucherRow = {
@@ -43,6 +53,7 @@ type DashboardData = {
   profileName: string | null;
   summaries: SummaryRow[];
   vouchers: VoucherRow[];
+  summaryWarning: string | null;
 };
 
 function numericValue(value: number | string): number {
@@ -84,20 +95,12 @@ async function fetchDashboardData(): Promise<DashboardData> {
     );
   }
 
-  const [companyResult, summariesResult, vouchersResult] = await Promise.all([
+  const [companyResult, vouchersResult] = await Promise.all([
     supabase
       .from("companies")
       .select("name")
       .eq("id", profile.company_id)
       .maybeSingle(),
-    supabase
-      .from("financial_summaries")
-      .select(
-        "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, gst_payable, gst_input, last_synced_at",
-      )
-      .eq("company_id", profile.company_id)
-      .order("period_start", { ascending: true })
-      .returns<SummaryRow[]>(),
     supabase
       .from("vouchers")
       .select(
@@ -108,18 +111,115 @@ async function fetchDashboardData(): Promise<DashboardData> {
       .limit(10)
       .returns<VoucherRow[]>(),
   ]);
-  const queryError =
-    companyResult.error ?? summariesResult.error ?? vouchersResult.error;
+  const summaryQuery = (columns: string) =>
+    supabase
+      .from("financial_summaries")
+      .select(columns)
+      .eq("company_id", profile.company_id)
+      .order("period_start", { ascending: true })
+      .returns<SummaryRow[]>();
+  const summaryColumnSets = [
+    "id, total_sales, total_purchases, total_expenses, net_profit, cash_in_hand, bank_balance, period_start, period_end, updated_at, gst_payable, gst_input, cgst_payable, sgst_payable, igst_payable, last_synced_at",
+    "id, total_sales, total_purchases, total_expenses, net_profit, period_start, period_end, updated_at, gst_payable, gst_input, cgst_payable, sgst_payable, igst_payable, last_synced_at",
+    "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, gst_payable, gst_input, last_synced_at",
+    "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, cgst_payable, sgst_payable, igst_payable, last_synced_at",
+    "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, cgst_amount, sgst_amount, igst_amount, last_synced_at",
+    "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, last_synced_at",
+  ];
+  let summaries: SummaryRow[] = [];
+  let summaryWarning: string | null = null;
+  for (const columns of summaryColumnSets) {
+    try {
+      const result = await summaryQuery(columns);
+      if (!result.error) {
+        summaries = result.data ?? [];
+        summaryWarning = null;
+        break;
+      }
+      summaryWarning = result.error.message;
+    } catch (summaryError) {
+      summaryWarning =
+        summaryError instanceof Error
+          ? summaryError.message
+          : "Unable to load financial summaries.";
+    }
+  }
+
+  const queryError = companyResult.error ?? vouchersResult.error;
   if (queryError) throw new Error(queryError.message);
   if (!companyResult.data) {
     throw new Error("The company linked to this account could not be found.");
   }
 
+  const normalizedSummaries = summaries.map((summary) => {
+    const {
+      id,
+      period_start = "",
+      period_end = "",
+      total_sales = 0,
+      total_purchases = 0,
+      total_expenses = 0,
+      net_profit = 0,
+      gst_payable,
+      gst_input = 0,
+      cgst_payable,
+      sgst_payable,
+      igst_payable,
+      cgst_amount,
+      sgst_amount,
+      igst_amount,
+      cash_in_hand,
+      bank_balance,
+      updated_at,
+      last_synced_at,
+    } = summary ?? {};
+    return {
+      id,
+      period_start,
+      period_end,
+      total_sales: total_sales ?? 0,
+      total_purchases: total_purchases ?? 0,
+      total_expenses: total_expenses ?? 0,
+      net_profit: net_profit ?? 0,
+      gst_payable:
+        gst_payable ??
+        numericValue(cgst_payable ?? cgst_amount ?? 0) +
+          numericValue(sgst_payable ?? sgst_amount ?? 0) +
+          numericValue(igst_payable ?? igst_amount ?? 0),
+      gst_input: gst_input ?? 0,
+      cash_in_hand,
+      bank_balance,
+      updated_at,
+      last_synced_at,
+    };
+  });
+  if (
+    !summaryWarning &&
+    summaries.some(
+      (summary) =>
+        summary.total_sales == null ||
+        summary.total_purchases == null ||
+        summary.total_expenses == null ||
+        summary.net_profit == null ||
+        (summary.gst_payable == null &&
+          summary.cgst_payable == null &&
+          summary.sgst_payable == null &&
+          summary.igst_payable == null &&
+          summary.cgst_amount == null &&
+          summary.sgst_amount == null &&
+          summary.igst_amount == null),
+    )
+  ) {
+    summaryWarning =
+      "Some financial summary columns are unpopulated; missing amounts are shown as 0. Ask your administrator to review the sync schema and data.";
+  }
+
   return {
     companyName: companyResult.data.name,
     profileName: profile.full_name,
-    summaries: summariesResult.data ?? [],
+    summaries: normalizedSummaries,
     vouchers: vouchersResult.data ?? [],
+    summaryWarning,
   };
 }
 
@@ -144,7 +244,9 @@ export default function DashboardPage() {
     [dashboard?.summaries],
   );
   const latest = chartData.at(-1);
-  const lastSyncedAt = dashboard?.summaries.at(-1)?.last_synced_at;
+  const latestSummary = dashboard?.summaries.at(-1);
+  const lastSyncedAt =
+    latestSummary?.last_synced_at ?? latestSummary?.updated_at ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -186,7 +288,7 @@ export default function DashboardPage() {
           className="mx-auto max-w-6xl space-y-8 px-6 py-8"
         >
           {loading ? (
-            <DashboardLoadingSkeleton />
+            <DashboardContentSkeleton />
           ) : error ? (
             <section className="rounded-xl border border-rose-200 bg-rose-50 p-6 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/30">
               <p role="alert" className="text-sm text-rose-800 dark:text-rose-200">
@@ -207,12 +309,16 @@ export default function DashboardPage() {
           ) : (
             <>
               {latest ? (
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   {[
                     { label: `Sales · ${latest.period}`, value: latest.sales },
                     {
-                      label: `Purchases & expenses · ${latest.period}`,
-                      value: latest.expenses,
+                      label: `Purchases · ${latest.period}`,
+                      value: numericValue(latestSummary?.total_purchases ?? 0),
+                    },
+                    {
+                      label: `Expenses · ${latest.period}`,
+                      value: numericValue(latestSummary?.total_expenses ?? 0),
                     },
                     {
                       label: `Net profit · ${latest.period}`,
@@ -224,7 +330,7 @@ export default function DashboardPage() {
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.06 }}
-                      className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]"
+                      className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg active:translate-y-0 dark:border-[#334155] dark:bg-[#1E293B] dark:hover:border-[#60A5FA]/40"
                     >
                       <p className="text-sm text-slate-500 dark:text-slate-400">
                         {stat.label}
@@ -244,6 +350,14 @@ export default function DashboardPage() {
                     dateStyle: "medium",
                     timeStyle: "short",
                   }).format(new Date(lastSyncedAt))}
+                </p>
+              ) : null}
+              {dashboard?.summaryWarning ? (
+                <p
+                  role="status"
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+                >
+                  Monthly summary data is unavailable: {dashboard.summaryWarning}
                 </p>
               ) : null}
 
@@ -297,7 +411,7 @@ export default function DashboardPage() {
                         {dashboard.vouchers.map((voucher) => (
                           <tr
                             key={voucher.id}
-                            className="border-t border-slate-100 dark:border-[#334155]"
+                            className="border-t border-slate-100 transition-colors hover:bg-white/70 dark:border-[#334155] dark:hover:bg-[#0F172A]/40"
                           >
                             <td className="whitespace-nowrap px-5 py-3 text-slate-600 dark:text-slate-300">
                               {new Intl.DateTimeFormat("en-IN", {
@@ -328,8 +442,8 @@ export default function DashboardPage() {
               {chartData.length === 0 && !dashboard?.vouchers.length ? (
                 <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
                   <EmptyStateGraphic
-                    title="No synced financial data yet"
-                    description="Once the TallyPrime sync is configured, your vouchers, monthly summaries, sales, expenses, and GST figures will appear here."
+                    title="No Tally Sync Data Available Yet"
+                    description="Your accountant has not run the Tally sync script for this company."
                   />
                 </section>
               ) : null}

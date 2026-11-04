@@ -60,7 +60,7 @@ export async function fetchProfileRole(
     .eq("id", userId)
     .maybeSingle();
 
-  if (error) return null;
+  if (error) throw new Error(`Unable to load your profile role: ${error.message}`);
   const role = data?.role;
   return role === "admin" || role === "employee" || role === "company"
     ? role

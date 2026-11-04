@@ -14,7 +14,7 @@ function jsonError(error: string, status: number) {
   return Response.json({ success: false, error }, { status });
 }
 
-export async function POST(request: Request) {
+async function createUser(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -74,8 +74,8 @@ export async function POST(request: Request) {
   if (!fullName) {
     return jsonError("Full name is required.", 400);
   }
-  if (role !== "employee" && role !== "company") {
-    return jsonError("Role must be either 'employee' or 'company'.", 400);
+  if (role !== "admin" && role !== "employee" && role !== "company") {
+    return jsonError("Role must be 'admin', 'employee', or 'company'.", 400);
   }
   if (companyId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(companyId)) {
     return jsonError("company_id must be a valid UUID.", 400);
@@ -244,4 +244,17 @@ export async function POST(request: Request) {
   }
 
   return Response.json({ success: true }, { status: 201 });
+}
+
+export async function POST(request: Request) {
+  try {
+    return await createUser(request);
+  } catch (error) {
+    return jsonError(
+      error instanceof Error
+        ? error.message
+        : "Unable to complete user provisioning.",
+      500,
+    );
+  }
 }
