@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createClient } from "@supabase/supabase-js";
 
 type CreateUserRequest = {
@@ -16,9 +18,15 @@ export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!serviceRoleKey) {
+    return Response.json(
+      { error: "SUPABASE_SERVICE_ROLE_KEY is not configured in .env.local" },
+      { status: 500 },
+    );
+  }
+  if (!supabaseUrl) {
     return jsonError(
-      "Server configuration error: set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+      "NEXT_PUBLIC_SUPABASE_URL is not configured in .env.local.",
       500,
     );
   }
@@ -73,7 +81,7 @@ export async function POST(request: Request) {
     return jsonError("company_id must be a valid UUID.", 400);
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+  const adminSupabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -81,12 +89,12 @@ export async function POST(request: Request) {
   });
 
   const { data: authData, error: authError } =
-    await supabase.auth.getUser(accessToken);
+    await adminSupabase.auth.getUser(accessToken);
   if (authError || !authData.user) {
     return jsonError("Your session is invalid or expired.", 401);
   }
 
-  const { data: adminProfile, error: profileLookupError } = await supabase
+  const { data: adminProfile, error: profileLookupError } = await adminSupabase
     .from("profiles")
     .select("role")
     .eq("id", authData.user.id)
@@ -100,7 +108,7 @@ export async function POST(request: Request) {
   }
 
   if (companyId) {
-    const { data: company, error: companyError } = await supabase
+    const { data: company, error: companyError } = await adminSupabase
       .from("companies")
       .select("id")
       .eq("id", companyId)
@@ -114,11 +122,10 @@ export async function POST(request: Request) {
   }
 
   const { data: createdUser, error: createError } =
-    await supabase.auth.admin.createUser({
+    await adminSupabase.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
-      user_metadata: { full_name: fullName, role },
     });
 
   if (createError) {
@@ -128,48 +135,109 @@ export async function POST(request: Request) {
     return jsonError("Supabase did not return the created user.", 500);
   }
 
-  const { error: insertProfileError } = await supabase.from("profiles").insert({
+  const profile = {
     id: createdUser.user.id,
     email,
     full_name: fullName,
     role,
-  });
+  };
+  const { error: profileWriteError } = await adminSupabase
+    .from("profiles")
+    .upsert(profile, { onConflict: "id" });
 
-  if (insertProfileError) {
-    const { error: cleanupError } = await supabase.auth.admin.deleteUser(
+  if (profileWriteError) {
+    const { error: cleanupError } = await adminSupabase.auth.admin.deleteUser(
       createdUser.user.id,
     );
     const cleanupDetail = cleanupError
       ? ` Authentication-user cleanup also failed: ${cleanupError.message}`
       : "";
     return jsonError(
-      `Unable to create user profile: ${insertProfileError.message}.${cleanupDetail}`,
+      `Unable to create user profile: ${profileWriteError.message}.${cleanupDetail}`,
       500,
     );
   }
 
   if (role === "company" && companyId) {
-    const { error: updateCompanyError } = await supabase
+    const { error: updateCompanyError } = await adminSupabase
       .from("profiles")
       .update({ company_id: companyId })
       .eq("id", createdUser.user.id);
 
     if (updateCompanyError) {
-      const { error: cleanupProfileError } = await supabase
+      const { error: cleanupProfileError } = await adminSupabase
         .from("profiles")
         .delete()
         .eq("id", createdUser.user.id);
-      const { error: cleanupUserError } = await supabase.auth.admin.deleteUser(
+      const { error: cleanupUserError } = await adminSupabase.auth.admin.deleteUser(
         createdUser.user.id,
       );
       const cleanupDetails = [
         cleanupProfileError
           ? ` Profile cleanup failed: ${cleanupProfileError.message}`
           : "",
-        cleanupUserError ? ` Authentication-user cleanup failed: ${cleanupUserError.message}` : "",
+        cleanupUserError
+          ? ` Authentication-user cleanup failed: ${cleanupUserError.message}`
+          : "",
       ].join("");
       return jsonError(
         `Unable to associate user with company: ${updateCompanyError.message}.${cleanupDetails}`,
+        500,
+      );
+    }
+  }
+
+  if (role === "employee" && companyId) {
+    const userId = createdUser.user.id;
+    let { error: assignmentError } = await adminSupabase
+      .from("company_employees")
+      .insert({
+        user_id: userId,
+        employee_id: userId,
+        company_id: companyId,
+      });
+
+    if (
+      assignmentError &&
+      /user_id/i.test(assignmentError.message) &&
+      /(column|schema cache|does not exist|could not find)/i.test(
+        assignmentError.message,
+      )
+    ) {
+      const legacyAssignment = await adminSupabase
+        .from("company_employees")
+        .insert({ employee_id: userId, company_id: companyId });
+      assignmentError = legacyAssignment.error;
+    } else if (
+      assignmentError &&
+      /employee_id/i.test(assignmentError.message) &&
+      /(column|schema cache|does not exist|could not find)/i.test(
+        assignmentError.message,
+      )
+    ) {
+      const userIdAssignment = await adminSupabase
+        .from("company_employees")
+        .insert({ user_id: userId, company_id: companyId });
+      assignmentError = userIdAssignment.error;
+    }
+
+    if (assignmentError) {
+      const { error: cleanupProfileError } = await adminSupabase
+        .from("profiles")
+        .delete()
+        .eq("id", userId);
+      const { error: cleanupUserError } =
+        await adminSupabase.auth.admin.deleteUser(userId);
+      const cleanupDetails = [
+        cleanupProfileError
+          ? ` Profile cleanup failed: ${cleanupProfileError.message}`
+          : "",
+        cleanupUserError
+          ? ` Authentication-user cleanup failed: ${cleanupUserError.message}`
+          : "",
+      ].join("");
+      return jsonError(
+        `Unable to assign employee to company: ${assignmentError.message}.${cleanupDetails}`,
         500,
       );
     }

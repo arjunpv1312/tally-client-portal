@@ -31,6 +31,19 @@ export function getSupabase(): SupabaseClient {
     });
   }
 
+  return getBrowserSupabase();
+}
+
+export function getBrowserSupabase(): SupabaseClient {
+  if (typeof window === "undefined") {
+    throw new Error("The browser Supabase client can only be used in the browser.");
+  }
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      "Missing Supabase env vars. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local.",
+    );
+  }
+
   if (!browserClient) {
     browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
   }

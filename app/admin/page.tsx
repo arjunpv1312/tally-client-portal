@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
 import { AuthGuard } from "@/components/AuthGuard";
-import { getSupabase } from "@/lib/supabase";
+import { getBrowserSupabase } from "@/lib/supabase";
 import type { Profile, UserRole } from "@/types";
 
 type Company = {
@@ -31,10 +31,11 @@ type Assignment = {
   id: string;
   employee_id: string;
   company_id: string;
-  created_at: string | null;
+  created_at: null;
 };
 
 type Tab = "companies" | "users" | "assignments";
+type DirectoryErrors = Partial<Record<Tab, string>>;
 
 const tabs: { id: Tab; label: string; icon: typeof Building2 }[] = [
   { id: "companies", label: "Companies", icon: Building2 },
@@ -77,14 +78,15 @@ export default function AdminPage() {
   );
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [directoryErrors, setDirectoryErrors] = useState<DirectoryErrors>({});
 
   const employees = useMemo(
     () => profiles.filter((profile) => profile.role === "employee"),
     [profiles],
   );
   const refreshDirectory = useCallback(async () => {
-    const supabase = getSupabase();
-    const [companyResult, profileResult, assignmentResult] = await Promise.all([
+    const supabase = getBrowserSupabase();
+    const [companyResult, profileResult, initialAssignmentResult] = await Promise.all([
       supabase
         .from("companies")
         .select("id, name, gstin, email, phone, created_at")
@@ -95,17 +97,44 @@ export default function AdminPage() {
         .order("created_at", { ascending: false }),
       supabase
         .from("company_employees")
-        .select("id, employee_id, company_id, created_at")
-        .order("created_at", { ascending: false }),
+        .select("id, company_id, user_id")
+        .order("id"),
     ]);
 
-    const queryError =
-      companyResult.error ?? profileResult.error ?? assignmentResult.error;
-    if (queryError) throw new Error(queryError.message);
+    const assignmentResult = initialAssignmentResult.error
+      ? await supabase
+        .from("company_employees")
+        .select("id, company_id, employee_id")
+        .order("id")
+      : initialAssignmentResult;
 
+    setDirectoryErrors({
+      ...(companyResult.error
+        ? { companies: companyResult.error.message }
+        : {}),
+      ...(profileResult.error ? { users: profileResult.error.message } : {}),
+      ...(assignmentResult.error
+        ? { assignments: assignmentResult.error.message }
+        : {}),
+    });
     setCompanies((companyResult.data ?? []) as Company[]);
     setProfiles((profileResult.data ?? []) as Profile[]);
-    setAssignments((assignmentResult.data ?? []) as Assignment[]);
+    setAssignments(
+      (assignmentResult.data ?? []).map((assignment) => {
+        const row = assignment as {
+          id: string;
+          company_id: string;
+          user_id?: string | null;
+          employee_id?: string | null;
+        };
+        return {
+          id: row.id,
+          company_id: row.company_id,
+          employee_id: row.user_id ?? row.employee_id ?? "",
+          created_at: null,
+        };
+      }),
+    );
   }, []);
 
   useEffect(() => {
@@ -150,7 +179,7 @@ export default function AdminPage() {
 
     try {
       const formData = new FormData(form);
-      const { error: insertError } = await getSupabase()
+      const { error: insertError } = await getBrowserSupabase()
         .from("companies")
         .insert({
           name: String(formData.get("name") ?? "").trim(),
@@ -184,7 +213,7 @@ export default function AdminPage() {
     const role = String(formData.get("role")) as "employee" | "company";
     try {
       const { data: sessionData, error: sessionError } =
-        await getSupabase().auth.getSession();
+        await getBrowserSupabase().auth.getSession();
       if (sessionError) throw new Error(sessionError.message);
       const accessToken = sessionData.session?.access_token;
       if (!accessToken) throw new Error("Your admin session has expired. Sign in again.");
@@ -200,8 +229,7 @@ export default function AdminPage() {
           password: String(formData.get("password") ?? ""),
           full_name: String(formData.get("full_name") ?? "").trim(),
           role,
-          company_id:
-            role === "company" ? String(formData.get("company_id") ?? "") : null,
+          company_id: String(formData.get("company_id") ?? "") || null,
         }),
       });
       const result = (await response.json()) as {
@@ -239,7 +267,7 @@ export default function AdminPage() {
     setError("");
     setNotice("");
     try {
-      const { error: deleteError } = await getSupabase()
+      const { error: deleteError } = await getBrowserSupabase()
         .from("companies")
         .delete()
         .eq("id", company.id);
@@ -266,12 +294,41 @@ export default function AdminPage() {
 
     try {
       const formData = new FormData(form);
-      const { error: insertError } = await getSupabase()
+      const employeeId = String(formData.get("employee_id") ?? "");
+      const companyId = String(formData.get("company_id") ?? "");
+      const supabase = getBrowserSupabase();
+      let { error: insertError } = await supabase
         .from("company_employees")
         .insert({
-          employee_id: String(formData.get("employee_id") ?? ""),
-          company_id: String(formData.get("company_id") ?? ""),
+          user_id: employeeId,
+          employee_id: employeeId,
+          company_id: companyId,
         });
+      if (
+        insertError &&
+        /user_id/i.test(insertError.message) &&
+        /(column|schema cache|does not exist|could not find)/i.test(
+          insertError.message,
+        )
+      ) {
+        const legacyInsert = await supabase.from("company_employees").insert({
+          employee_id: employeeId,
+          company_id: companyId,
+        });
+        insertError = legacyInsert.error;
+      } else if (
+        insertError &&
+        /employee_id/i.test(insertError.message) &&
+        /(column|schema cache|does not exist|could not find)/i.test(
+          insertError.message,
+        )
+      ) {
+        const userIdInsert = await supabase.from("company_employees").insert({
+          user_id: employeeId,
+          company_id: companyId,
+        });
+        insertError = userIdInsert.error;
+      }
       if (insertError) throw new Error(insertError.message);
       form.reset();
       await completeAction("Employee assigned to company.");
@@ -292,7 +349,7 @@ export default function AdminPage() {
     setError("");
     setNotice("");
     try {
-      const { error: deleteError } = await getSupabase()
+      const { error: deleteError } = await getBrowserSupabase()
         .from("company_employees")
         .delete()
         .eq("id", assignment.id);
@@ -417,6 +474,7 @@ export default function AdminPage() {
                   >
                     {activeTab === "companies" && (
                       <div className="space-y-7">
+                        <DirectoryError message={directoryErrors.companies} />
                         <div>
                           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                             Create a company
@@ -522,6 +580,7 @@ export default function AdminPage() {
 
                     {activeTab === "users" && (
                       <div className="space-y-7">
+                        <DirectoryError message={directoryErrors.users} />
                         <div>
                           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                             Provision an account
@@ -583,14 +642,22 @@ export default function AdminPage() {
                               </select>
                             </label>
                             <label>
-                              <span className={labelClassName}>Client company</span>
+                              <span className={labelClassName}>
+                                {newUserRole === "company"
+                                  ? "Client company"
+                                  : "Assign to company (optional)"}
+                              </span>
                               <select
                                 className={inputClassName}
                                 name="company_id"
                                 defaultValue=""
                                 required={newUserRole === "company"}
                               >
-                                <option value="">Select a company (for clients)</option>
+                                <option value="">
+                                  {newUserRole === "company"
+                                    ? "Select a company"
+                                    : "No company assignment"}
+                                </option>
                                 {companies.map((company) => (
                                   <option key={company.id} value={company.id}>
                                     {company.name}
@@ -646,6 +713,7 @@ export default function AdminPage() {
 
                     {activeTab === "assignments" && (
                       <div className="space-y-7">
+                        <DirectoryError message={directoryErrors.assignments} />
                         <div>
                           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                             Assign an employee
@@ -814,5 +882,18 @@ function DataTable({
         </table>
       </div>
     </section>
+  );
+}
+
+function DirectoryError({ message }: { message?: string }) {
+  if (!message) return null;
+
+  return (
+    <div
+      role="alert"
+      className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+    >
+      This section could not be loaded: {message}
+    </div>
   );
 }
