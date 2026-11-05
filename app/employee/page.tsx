@@ -103,16 +103,18 @@ export default function EmployeePage() {
 
   return (
     <AuthGuard allow="employee">
-      <div className="min-h-screen bg-white dark:bg-[#0F172A]">
+      <div className="min-h-screen bg-white dark:bg-finora-dark">
         <AppHeader
           title="Accountant Workspace"
           subtitle="Companies assigned to you and entry status"
+          roleLabel="Employee"
+          navItems={[{ label: "Workspace", href: "/employee" }]}
         />
         <motion.main
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="mx-auto max-w-5xl px-6 py-8"
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          className="mx-auto max-w-5xl px-4 py-6 transform-gpu will-change-transform sm:px-6 lg:px-8"
         >
           {warning ? (
             <p
@@ -133,7 +135,8 @@ export default function EmployeePage() {
                 {error}
               </p>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              <div className="hidden w-full overflow-x-auto scrollbar-thin scrollbar-thumb-amber-500/20 sm:block">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b border-slate-200 bg-white text-slate-600 dark:border-[#334155] dark:bg-[#0F172A]/40 dark:text-slate-400">
                     <tr>
@@ -179,6 +182,39 @@ export default function EmployeePage() {
                   </tbody>
                 </table>
               </div>
+              <div className="space-y-3 p-3 sm:hidden">
+                {rows.map((row) => {
+                  const entryStatus = row.entry_status || "active";
+                  return (
+                    <article
+                      key={row.id}
+                      className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="truncate font-semibold text-slate-900 dark:text-slate-100">
+                            {row.company?.name ?? "Company unavailable"}
+                          </h2>
+                          <p className="mt-1 break-all text-sm text-slate-500 dark:text-slate-400">
+                            {row.company?.gstin || "No GSTIN"}
+                          </p>
+                        </div>
+                        <span
+                          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusStyles[entryStatus]}`}
+                        >
+                          {entryStatus.replace("_", " ")}
+                        </span>
+                      </div>
+                    </article>
+                  );
+                })}
+                {rows.length === 0 ? (
+                  <p className="px-3 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+                    No companies have been assigned to you yet.
+                  </p>
+                ) : null}
+              </div>
+              </>
             )}
           </div>
         </motion.main>

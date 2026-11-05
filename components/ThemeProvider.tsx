@@ -73,7 +73,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider value={value}>
-      <div className="min-h-full flex flex-col bg-white text-slate-900 dark:bg-finora-dark dark:text-[#F8F4E8]">
+      <div className="min-h-full flex flex-col bg-white text-slate-900 dark:bg-transparent dark:text-[#F8F4E8]">
         {children}
       </div>
       <Toaster position="top-right" richColors theme={theme} closeButton />

@@ -419,6 +419,8 @@ export default function DashboardPage() {
           subtitle="Read-only financial reporting"
           identityName={dashboard?.companyName ?? dashboard?.profileName ?? undefined}
           identityLabel="Client company"
+          roleLabel="Client"
+          navItems={[{ label: "Overview", href: "/dashboard" }]}
         />
         <motion.main
           initial={{ opacity: 0, y: 12 }}
@@ -518,21 +520,21 @@ export default function DashboardPage() {
 
               {chartData.length > 0 ? (
                 <>
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg">
+                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg sm:p-6">
                     <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
                       Sales vs Purchases & Expenses
                     </h2>
                     <SalesExpensesBarChart data={chartData} />
                   </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg">
+                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg sm:p-6">
                     <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
                       Net Profit Trend
                     </h2>
                     <NetProfitAreaChart data={chartData} />
                   </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg">
+                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg sm:p-6">
                     <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
                       GST Summary
                     </h2>
@@ -551,7 +553,7 @@ export default function DashboardPage() {
                       Latest entries synchronized from TallyPrime
                     </p>
                   </div>
-                  <div className="hidden w-full overflow-x-auto sm:block">
+                  <div className="hidden w-full overflow-x-auto scrollbar-thin scrollbar-thumb-amber-500/20 sm:block">
                     <table className="w-full text-left text-sm">
                       <thead className="bg-white text-slate-600 dark:bg-finora-dark/50 dark:text-slate-400">
                         <tr>

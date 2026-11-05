@@ -12,6 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useEffect, useState } from "react";
 import type { VoucherSummary } from "@/types";
 
 type FinancialChartsProps = {
@@ -25,16 +26,36 @@ const chartTooltipStyle = {
   color: "var(--foreground, #0f172a)",
 };
 
+function useMobileChartLayout() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 639px)");
+    const update = () => setIsMobile(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
+
+  return isMobile;
+}
+
 export function SalesExpensesBarChart({ data }: FinancialChartsProps) {
+  const isMobile = useMobileChartLayout();
+  const axisTick = {
+    fontSize: isMobile ? 10 : 12,
+    fill: "var(--foreground)",
+  };
+
   return (
-    <div className="h-72 w-full">
+    <div className="h-[260px] w-full sm:h-[320px] md:h-[380px]">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-          <XAxis dataKey="period" tick={{ fontSize: 12, fill: "var(--foreground)" }} />
-          <YAxis tick={{ fontSize: 12, fill: "var(--foreground)" }} />
-          <Tooltip contentStyle={chartTooltipStyle} />
-          <Legend />
+          <XAxis dataKey="period" interval={isMobile ? "preserveStartEnd" : 0} tick={axisTick} />
+          <YAxis tick={axisTick} />
+          <Tooltip contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }} />
+          <Legend wrapperStyle={{ fontSize: isMobile ? 11 : 13 }} />
           <Bar dataKey="sales" name="Sales" fill="#E5C365" radius={[6, 6, 0, 0]} />
           <Bar
             dataKey="expenses"
@@ -49,8 +70,14 @@ export function SalesExpensesBarChart({ data }: FinancialChartsProps) {
 }
 
 export function NetProfitAreaChart({ data }: FinancialChartsProps) {
+  const isMobile = useMobileChartLayout();
+  const axisTick = {
+    fontSize: isMobile ? 10 : 12,
+    fill: "var(--foreground)",
+  };
+
   return (
-    <div className="h-64 w-full">
+    <div className="h-[260px] w-full sm:h-[320px] md:h-[380px]">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <defs>
@@ -60,9 +87,9 @@ export function NetProfitAreaChart({ data }: FinancialChartsProps) {
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-          <XAxis dataKey="period" tick={{ fontSize: 12, fill: "var(--foreground)" }} />
-          <YAxis tick={{ fontSize: 12, fill: "var(--foreground)" }} />
-          <Tooltip contentStyle={chartTooltipStyle} />
+          <XAxis dataKey="period" interval={isMobile ? "preserveStartEnd" : 0} tick={axisTick} />
+          <YAxis tick={axisTick} />
+          <Tooltip contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }} />
           <Area
             type="monotone"
             dataKey="net_profit"
@@ -78,6 +105,11 @@ export function NetProfitAreaChart({ data }: FinancialChartsProps) {
 }
 
 export function GstSummaryBarChart({ data }: FinancialChartsProps) {
+  const isMobile = useMobileChartLayout();
+  const axisTick = {
+    fontSize: isMobile ? 10 : 12,
+    fill: "var(--foreground)",
+  };
   const gstRows = data.map((row) => ({
     period: row.period,
     "GST Payable": row.gst_payable,
@@ -85,14 +117,14 @@ export function GstSummaryBarChart({ data }: FinancialChartsProps) {
   }));
 
   return (
-    <div className="h-56 w-full">
+    <div className="h-[260px] w-full sm:h-[320px] md:h-[380px]">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={gstRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-          <XAxis dataKey="period" tick={{ fontSize: 12, fill: "var(--foreground)" }} />
-          <YAxis tick={{ fontSize: 12, fill: "var(--foreground)" }} />
-          <Tooltip contentStyle={chartTooltipStyle} />
-          <Legend />
+          <XAxis dataKey="period" interval={isMobile ? "preserveStartEnd" : 0} tick={axisTick} />
+          <YAxis tick={axisTick} />
+          <Tooltip contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }} />
+          <Legend wrapperStyle={{ fontSize: isMobile ? 11 : 13 }} />
           <Bar dataKey="GST Payable" fill="#E5C365" radius={[6, 6, 0, 0]} />
           <Bar dataKey="GST Input" fill="#9E7C28" radius={[6, 6, 0, 0]} />
         </BarChart>

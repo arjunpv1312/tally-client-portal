@@ -51,9 +51,9 @@ const inputClassName =
 const labelClassName =
   "mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300";
 const buttonClassName =
-  "inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-lg active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-sm dark:bg-[#60A5FA] dark:text-slate-950 dark:hover:bg-blue-300";
+  "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-lg active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-sm dark:bg-[#60A5FA] dark:text-slate-950 dark:hover:bg-blue-300";
 const rowActionClassName =
-  "inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 transition-all duration-200 hover:-translate-y-0.5 hover:bg-rose-50 hover:shadow-sm active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 dark:text-rose-300 dark:hover:bg-rose-950/40";
+  "inline-flex min-h-12 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 transition-all duration-200 hover:-translate-y-0.5 hover:bg-rose-50 hover:shadow-sm active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 dark:text-rose-300 dark:hover:bg-rose-950/40";
 
 async function callAdminApi(
   pathname: string,
@@ -504,12 +504,27 @@ export default function AdminPage() {
 
   return (
     <AuthGuard allow="admin">
-      <div className="min-h-screen bg-white dark:bg-[#0F172A]">
+      <div className="min-h-screen bg-white dark:bg-transparent">
         <AppHeader
           title="Admin Dashboard"
           subtitle="Manage client companies, user access, and team assignments"
+          roleLabel="Administrator"
+          activeNavItem={activeTab}
+          navItems={[
+            { label: "companies", onSelect: () => setActiveTab("companies") },
+            { label: "users", onSelect: () => setActiveTab("users") },
+            {
+              label: "assignments",
+              onSelect: () => setActiveTab("assignments"),
+            },
+          ]}
         />
-        <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        <motion.main
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          className="mx-auto max-w-7xl space-y-6 px-4 py-6 transform-gpu will-change-transform sm:px-6 lg:px-8"
+        >
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6 lg:grid-cols-4">
             {[
               { label: "Companies", value: companies.length, icon: Building2 },
@@ -1176,7 +1191,7 @@ export default function AdminPage() {
               </AnimatePresence>
             </div>
           </section>
-        </main>
+        </motion.main>
       </div>
     </AuthGuard>
   );
@@ -1187,12 +1202,14 @@ function DataTable({
   count,
   headers,
   emptyText,
+  mobileContent,
   children,
 }: {
   title: string;
   count: number;
   headers: string[];
   emptyText: string;
+  mobileContent: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -1203,7 +1220,7 @@ function DataTable({
           {count} {count === 1 ? "record" : "records"}
         </span>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
+      <div className="hidden w-full overflow-x-auto scrollbar-thin scrollbar-thumb-amber-500/20 rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B] sm:block">
         <table className="min-w-full divide-y divide-slate-200 text-left text-sm dark:divide-[#334155]">
           <thead className="bg-slate-50 dark:bg-[#1E293B]">
             <tr>
@@ -1233,6 +1250,15 @@ function DataTable({
             )}
           </tbody>
         </table>
+      </div>
+      <div className="space-y-3 sm:hidden">
+        {count > 0 ? (
+          mobileContent
+        ) : (
+          <p className="rounded-xl border border-slate-200 bg-[#F8FAFC] px-4 py-8 text-center text-sm text-slate-500 dark:border-finora-gold/15 dark:bg-finora-surface/70 dark:text-slate-400">
+            {emptyText}
+          </p>
+        )}
       </div>
     </section>
   );
