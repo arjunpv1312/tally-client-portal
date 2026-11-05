@@ -65,9 +65,12 @@ create table if not exists public.vouchers (
   voucher_number text,
   voucher_type text not null
     check (voucher_type in ('sales', 'purchase', 'receipt', 'payment')),
+  date date,
   voucher_date date not null,
   party_name text,
+  narration text,
   total_amount numeric(18, 2) not null default 0,
+  amount numeric(18, 2) not null default 0,
   sales_amount numeric(18, 2) not null default 0,
   purchase_amount numeric(18, 2) not null default 0,
   expense_amount numeric(18, 2) not null default 0,
@@ -79,6 +82,11 @@ create table if not exists public.vouchers (
   updated_at timestamptz not null default now(),
   unique (company_id, tally_voucher_id)
 );
+
+alter table public.vouchers
+  add column if not exists date date,
+  add column if not exists amount numeric(18, 2) not null default 0,
+  add column if not exists narration text;
 
 create table if not exists public.financial_summaries (
   id uuid primary key default gen_random_uuid(),

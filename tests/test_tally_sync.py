@@ -9,6 +9,7 @@ from unittest.mock import patch
 from tally_sync import (
     SyncError,
     _http_request,
+    _voucher_row,
     _validate_supabase_url,
     build_daybook_request,
     parse_daybook_xml,
@@ -69,6 +70,9 @@ class TallySyncTests(unittest.TestCase):
         self.assertEqual(purchase.purchase_amount, Decimal("200.00"))
         self.assertEqual(payment.expense_amount, Decimal("50.00"))
         self.assertEqual(payment.total_amount, Decimal("50.00"))
+        row = _voucher_row("company-1", payment)
+        self.assertEqual(row["total_amount"], row["amount"])
+        self.assertEqual(row["date"], row["voucher_date"])
 
     def test_payment_is_not_assumed_to_be_an_expense(self) -> None:
         payment = parse_daybook_xml(DAYBOOK_XML)[2]

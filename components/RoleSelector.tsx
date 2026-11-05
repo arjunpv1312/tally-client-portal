@@ -19,12 +19,12 @@ export function RoleSelector({ value, onChange }: RoleSelectorProps) {
 
   return (
     <div
-      className="relative grid grid-cols-3 rounded-xl border border-slate-200 bg-slate-100/80 p-1 dark:border-[#334155] dark:bg-[#0F172A]/80"
+      className="relative grid grid-cols-3 rounded-xl border border-slate-200 bg-slate-100/80 p-1 dark:border-finora-gold/20 dark:bg-finora-dark/80"
       role="tablist"
       aria-label="Login role"
     >
       <motion.div
-        className="absolute bottom-1 top-1 rounded-lg bg-white shadow-sm dark:bg-[#334155]"
+        className="absolute bottom-1 top-1 rounded-lg bg-white shadow-sm dark:bg-finora-gold/15 dark:shadow-gold-glow"
         layout
         transition={{ type: "spring", stiffness: 400, damping: 30 }}
         style={{
@@ -43,7 +43,7 @@ export function RoleSelector({ value, onChange }: RoleSelectorProps) {
             onClick={() => onChange(role.id)}
             className={`relative z-10 rounded-lg px-2 py-2.5 text-sm font-medium transition-colors ${
               selected
-                ? "text-slate-900 dark:text-slate-50"
+                ? "text-slate-900 dark:text-finora-gold-light"
                 : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
             }`}
           >

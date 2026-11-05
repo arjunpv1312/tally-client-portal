@@ -43,6 +43,7 @@ class Voucher:
     voucher_type: str
     voucher_date: date
     party_name: str | None
+    narration: str | None
     total_amount: Decimal
     sales_amount: Decimal
     purchase_amount: Decimal
@@ -264,6 +265,7 @@ def parse_daybook_xml(
             voucher_type=voucher_type,
             voucher_date=voucher_date,
             party_name=_child_text(element, "PARTYLEDGERNAME", "PARTYNAME"),
+            narration=_child_text(element, "NARRATION"),
             total_amount=total_amount,
             sales_amount=sales_amount,
             purchase_amount=purchase_amount,
@@ -412,9 +414,12 @@ def _voucher_row(company_id: str, voucher: Voucher) -> dict[str, Any]:
         "tally_voucher_id": voucher.tally_voucher_id,
         "voucher_number": voucher.voucher_number,
         "voucher_type": voucher.voucher_type,
+        "date": voucher.voucher_date.isoformat(),
         "voucher_date": voucher.voucher_date.isoformat(),
         "party_name": voucher.party_name,
+        "narration": voucher.narration,
         "total_amount": str(voucher.total_amount),
+        "amount": str(voucher.total_amount),
         "sales_amount": str(voucher.sales_amount),
         "purchase_amount": str(voucher.purchase_amount),
         "expense_amount": str(voucher.expense_amount),

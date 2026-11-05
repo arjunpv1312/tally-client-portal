@@ -101,14 +101,14 @@ export function LoginForm() {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35 }}
-      className="w-full max-w-md space-y-6 rounded-xl border border-slate-200 bg-[#F8FAFC] p-8 shadow-sm transition-all duration-200 hover:shadow-lg dark:border-[#334155] dark:bg-[#1E293B]"
+      className="w-full max-w-md space-y-6 rounded-2xl border border-slate-200 bg-white/90 p-8 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/75 dark:shadow-black/30"
     >
       <div className="space-y-1 text-center">
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">
-          Tally Client Portal
+        <h2 className="text-2xl font-semibold text-slate-900 dark:text-[#F8F4E8]">
+          Welcome to FINORA
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          Sign in with credentials issued by your administrator
+          Accounting &amp; Business Solutions
         </p>
       </div>
 
@@ -127,7 +127,7 @@ export function LoginForm() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-900 outline-none ring-blue-600/30 transition focus:border-blue-500 focus:ring-2 dark:border-[#334155] dark:bg-[#0F172A]/70 dark:text-slate-50 dark:focus:border-[#60A5FA] dark:focus:ring-[#60A5FA]/30"
+              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-900 outline-none ring-finora-gold/30 transition focus:border-finora-gold-dark focus:ring-2 dark:border-finora-gold/20 dark:bg-finora-dark/70 dark:text-slate-50 dark:focus:border-finora-gold dark:focus:ring-finora-gold/30"
               placeholder="you@company.com"
             />
           </span>
@@ -145,7 +145,7 @@ export function LoginForm() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-900 outline-none ring-blue-600/30 transition focus:border-blue-500 focus:ring-2 dark:border-[#334155] dark:bg-[#0F172A]/70 dark:text-slate-50 dark:focus:border-[#60A5FA] dark:focus:ring-[#60A5FA]/30"
+              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-900 outline-none ring-finora-gold/30 transition focus:border-finora-gold-dark focus:ring-2 dark:border-finora-gold/20 dark:bg-finora-dark/70 dark:text-slate-50 dark:focus:border-finora-gold dark:focus:ring-finora-gold/30"
               placeholder="••••••••"
             />
           </span>
@@ -170,7 +170,7 @@ export function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-500 hover:shadow-lg active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-sm dark:bg-[#60A5FA] dark:text-slate-950 dark:hover:bg-blue-300"
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#E5C365] via-[#F5E4AA] to-[#D4AF37] py-2.5 text-sm font-bold text-slate-950 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-gold-glow active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
       >
         {loading ? (
           <>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
@@ -14,7 +14,7 @@ import {
   SalesExpensesBarChart,
 } from "@/components/FinancialCharts";
 import { EmptyStateGraphic } from "@/components/ui/EmptyStateGraphic";
-import { getSupabase } from "@/lib/supabase";
+import { getBrowserSupabase, getSupabase } from "@/lib/supabase";
 import type { VoucherSummary } from "@/types";
 
 type SummaryRow = {
@@ -41,19 +41,23 @@ type SummaryRow = {
 
 type VoucherRow = {
   id: string;
-  voucher_date: string;
+  date: string | null;
   voucher_number: string | null;
   voucher_type: string;
   party_name: string | null;
-  total_amount: number | string;
+  narration: string | null;
+  total_amount: number | string | null;
+  amount: number | string | null;
 };
 
 type DashboardData = {
+  companyId: string;
   companyName: string;
   profileName: string | null;
   summaries: SummaryRow[];
   vouchers: VoucherRow[];
   summaryWarning: string | null;
+  voucherWarning: string | null;
 };
 
 function numericValue(value: number | string): number {
@@ -95,22 +99,86 @@ async function fetchDashboardData(): Promise<DashboardData> {
     );
   }
 
-  const [companyResult, vouchersResult] = await Promise.all([
+  const [companyResult] = await Promise.all([
     supabase
       .from("companies")
       .select("name")
       .eq("id", profile.company_id)
       .maybeSingle(),
+  ]);
+  const voucherQuery = (columns: string, orderColumn: string) =>
     supabase
       .from("vouchers")
-      .select(
-        "id, voucher_date, voucher_number, voucher_type, party_name, total_amount",
-      )
+      .select(columns)
       .eq("company_id", profile.company_id)
-      .order("voucher_date", { ascending: false })
+      .order(orderColumn, { ascending: false })
       .limit(10)
-      .returns<VoucherRow[]>(),
-  ]);
+      .returns<
+        {
+          id: string;
+          total_amount?: number | string | null;
+          amount?: number | string | null;
+          party_name?: string | null;
+          voucher_type?: string | null;
+          date?: string | null;
+          voucher_date?: string | null;
+          narration?: string | null;
+          voucher_number?: string | null;
+        }[]
+      >();
+  const voucherVariants = [
+    {
+      columns:
+        "id, total_amount, amount, party_name, voucher_type, date, voucher_date, voucher_number, narration",
+      orderColumn: "date",
+    },
+    {
+      columns:
+        "id, total_amount, amount, party_name, voucher_type, date, narration",
+      orderColumn: "date",
+    },
+    {
+      columns:
+        "id, total_amount, party_name, voucher_type, voucher_date, voucher_number, narration",
+      orderColumn: "voucher_date",
+    },
+    {
+      columns:
+        "id, total_amount, voucher_date, voucher_number, voucher_type, party_name",
+      orderColumn: "voucher_date",
+    },
+    {
+      columns: "id, amount, date, voucher_type, party_name, narration",
+      orderColumn: "date",
+    },
+  ];
+  let voucherRows: VoucherRow[] = [];
+  let voucherWarning: string | null = null;
+  for (const variant of voucherVariants) {
+    try {
+      const result = await voucherQuery(variant.columns, variant.orderColumn);
+      if (!result.error) {
+        voucherRows = (result.data ?? []).map((voucher) => ({
+          id: voucher.id,
+          date: voucher.date ?? voucher.voucher_date ?? null,
+          voucher_number: voucher.voucher_number ?? null,
+          voucher_type: voucher.voucher_type ?? "unknown",
+          party_name: voucher.party_name ?? null,
+          narration: voucher.narration ?? null,
+          total_amount: voucher.total_amount ?? null,
+          amount: voucher.amount ?? null,
+        }));
+        voucherWarning = null;
+        break;
+      }
+      voucherWarning = result.error.message;
+    } catch (voucherError) {
+      voucherWarning =
+        voucherError instanceof Error
+          ? voucherError.message
+          : "Unable to load voucher data.";
+    }
+  }
   const summaryQuery = (columns: string) =>
     supabase
       .from("financial_summaries")
@@ -145,8 +213,7 @@ async function fetchDashboardData(): Promise<DashboardData> {
     }
   }
 
-  const queryError = companyResult.error ?? vouchersResult.error;
-  if (queryError) throw new Error(queryError.message);
+  if (companyResult.error) throw new Error(companyResult.error.message);
   if (!companyResult.data) {
     throw new Error("The company linked to this account could not be found.");
   }
@@ -215,11 +282,13 @@ async function fetchDashboardData(): Promise<DashboardData> {
   }
 
   return {
+    companyId: profile.company_id,
     companyName: companyResult.data.name,
     profileName: profile.full_name,
     summaries: normalizedSummaries,
-    vouchers: vouchersResult.data ?? [],
+    vouchers: voucherRows,
     summaryWarning,
+    voucherWarning,
   };
 }
 
@@ -228,6 +297,23 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
+  const [realtimeError, setRealtimeError] = useState("");
+
+  const refreshFromRealtime = useCallback(async () => {
+    try {
+      const data = await fetchDashboardData();
+      setDashboard(data);
+      setError("");
+      setRealtimeError("");
+    } catch (loadError) {
+      const message =
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to refresh live financial data.";
+      setRealtimeError(message);
+      toast.error(`Live dashboard update failed: ${message}`);
+    }
+  }, []);
 
   const chartData = useMemo<VoucherSummary[]>(
     () =>
@@ -272,9 +358,62 @@ export default function DashboardPage() {
     };
   }, [reloadVersion]);
 
+  useEffect(() => {
+    const companyId = dashboard?.companyId;
+    if (!companyId) return;
+
+    const supabase = getBrowserSupabase();
+    let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+    const channel = supabase
+      .channel(`dashboard-realtime-${companyId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "financial_summaries",
+          filter: `company_id=eq.${companyId}`,
+        },
+        () => {
+          if (refreshTimeout) clearTimeout(refreshTimeout);
+          refreshTimeout = setTimeout(() => {
+            void refreshFromRealtime();
+          }, 250);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vouchers",
+          filter: `company_id=eq.${companyId}`,
+        },
+        () => {
+          if (refreshTimeout) clearTimeout(refreshTimeout);
+          refreshTimeout = setTimeout(() => {
+            void refreshFromRealtime();
+          }, 250);
+        },
+      )
+      .subscribe((status, subscriptionError) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          const message =
+            subscriptionError?.message ??
+            "Supabase Realtime could not connect. Dashboard data will remain available but may not update automatically.";
+          setRealtimeError(message);
+        }
+      });
+
+    return () => {
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      void supabase.removeChannel(channel);
+    };
+  }, [dashboard?.companyId, refreshFromRealtime]);
+
   return (
     <AuthGuard allow="company">
-      <div className="min-h-screen bg-white dark:bg-[#0F172A]">
+      <div className="min-h-screen bg-white dark:bg-transparent">
         <AppHeader
           title="Financial Overview"
           subtitle="Read-only financial reporting"
@@ -284,8 +423,8 @@ export default function DashboardPage() {
         <motion.main
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="mx-auto max-w-6xl space-y-8 px-6 py-8"
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          className="mx-auto max-w-6xl space-y-8 px-4 py-6 transform-gpu will-change-transform sm:px-6 lg:px-8"
         >
           {loading ? (
             <DashboardContentSkeleton />
@@ -309,7 +448,7 @@ export default function DashboardPage() {
           ) : (
             <>
               {latest ? (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 lg:grid-cols-4">
                   {[
                     { label: `Sales · ${latest.period}`, value: latest.sales },
                     {
@@ -330,12 +469,12 @@ export default function DashboardPage() {
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.06 }}
-                      className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg active:translate-y-0 dark:border-[#334155] dark:bg-[#1E293B] dark:hover:border-[#60A5FA]/40"
+                      className="relative overflow-hidden rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-finora-gold/50 hover:shadow-gold-glow active:translate-y-0 dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg dark:hover:border-finora-gold/50 dark:hover:shadow-gold-glow before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-finora-gold/70 before:to-transparent"
                     >
-                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                      <p className="relative text-sm text-slate-500 dark:text-slate-400">
                         {stat.label}
                       </p>
-                      <p className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-50">
+                      <p className="relative mt-1 text-2xl font-semibold text-slate-900 dark:text-[#F8F4E8]">
                         {formatCurrency(stat.value)}
                       </p>
                     </motion.section>
@@ -360,25 +499,41 @@ export default function DashboardPage() {
                   Monthly summary data is unavailable: {dashboard.summaryWarning}
                 </p>
               ) : null}
+              {dashboard?.voucherWarning ? (
+                <p
+                  role="status"
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+                >
+                  Recent voucher data is unavailable: {dashboard.voucherWarning}
+                </p>
+              ) : null}
+              {realtimeError ? (
+                <p
+                  role="status"
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+                >
+                  Live updates are unavailable: {realtimeError}
+                </p>
+              ) : null}
 
               {chartData.length > 0 ? (
                 <>
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
-                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-50">
+                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg">
+                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
                       Sales vs Purchases & Expenses
                     </h2>
                     <SalesExpensesBarChart data={chartData} />
                   </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
-                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-50">
+                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg">
+                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
                       Net Profit Trend
                     </h2>
                     <NetProfitAreaChart data={chartData} />
                   </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
-                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-50">
+                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-6 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg">
+                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
                       GST Summary
                     </h2>
                     <GstSummaryBarChart data={chartData} />
@@ -387,18 +542,18 @@ export default function DashboardPage() {
               ) : null}
 
               {dashboard?.vouchers.length ? (
-                <section className="overflow-hidden rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
-                  <div className="border-b border-slate-200 px-5 py-4 dark:border-[#334155]">
-                    <h2 className="font-semibold text-slate-900 dark:text-slate-100">
+                <section className="overflow-hidden rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg">
+                  <div className="border-b border-slate-200 px-5 py-4 dark:border-finora-gold/20">
+                    <h2 className="font-semibold text-slate-900 dark:text-[#F8F4E8]">
                       Recent vouchers
                     </h2>
                     <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                       Latest entries synchronized from TallyPrime
                     </p>
                   </div>
-                  <div className="overflow-x-auto">
+                  <div className="hidden w-full overflow-x-auto sm:block">
                     <table className="w-full text-left text-sm">
-                      <thead className="bg-white text-slate-600 dark:bg-[#0F172A]/50 dark:text-slate-400">
+                      <thead className="bg-white text-slate-600 dark:bg-finora-dark/50 dark:text-slate-400">
                         <tr>
                           <th className="px-5 py-3 font-medium">Date</th>
                           <th className="px-5 py-3 font-medium">Voucher</th>
@@ -408,33 +563,80 @@ export default function DashboardPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {dashboard.vouchers.map((voucher) => (
-                          <tr
-                            key={voucher.id}
-                            className="border-t border-slate-100 transition-colors hover:bg-white/70 dark:border-[#334155] dark:hover:bg-[#0F172A]/40"
-                          >
-                            <td className="whitespace-nowrap px-5 py-3 text-slate-600 dark:text-slate-300">
-                              {new Intl.DateTimeFormat("en-IN", {
-                                dateStyle: "medium",
-                                timeZone: "UTC",
-                              }).format(new Date(`${voucher.voucher_date}T00:00:00Z`))}
-                            </td>
-                            <td className="px-5 py-3 font-medium text-slate-900 dark:text-slate-100">
-                              {voucher.voucher_number || "—"}
-                            </td>
-                            <td className="px-5 py-3 capitalize text-slate-600 dark:text-slate-300">
-                              {voucher.voucher_type}
-                            </td>
-                            <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
-                              {voucher.party_name || "—"}
-                            </td>
-                            <td className="whitespace-nowrap px-5 py-3 text-right font-medium text-slate-900 dark:text-slate-100">
-                              {formatCurrency(numericValue(voucher.total_amount))}
-                            </td>
-                          </tr>
-                        ))}
+                        {dashboard.vouchers.map((voucher) => {
+                          const finalAmount =
+                            voucher.total_amount ?? voucher.amount ?? 0;
+                          const voucherDate = voucher.date
+                            ? new Date(`${voucher.date}T00:00:00Z`)
+                            : null;
+                          return (
+                            <tr
+                              key={voucher.id}
+                              className="border-t border-slate-100 transition-colors hover:bg-finora-gold/5 dark:border-finora-gold/10 dark:hover:bg-finora-gold/5"
+                            >
+                              <td className="whitespace-nowrap px-5 py-3 text-slate-600 dark:text-slate-300">
+                                {voucherDate && !Number.isNaN(voucherDate.getTime())
+                                  ? new Intl.DateTimeFormat("en-IN", {
+                                      dateStyle: "medium",
+                                      timeZone: "UTC",
+                                    }).format(voucherDate)
+                                  : "—"}
+                              </td>
+                              <td className="px-5 py-3 font-medium text-slate-900 dark:text-[#F8F4E8]">
+                                {voucher.voucher_number || "—"}
+                              </td>
+                              <td className="px-5 py-3 capitalize text-slate-600 dark:text-slate-300">
+                                {voucher.voucher_type}
+                              </td>
+                              <td className="px-5 py-3 text-slate-600 dark:text-slate-300">
+                                {voucher.party_name || voucher.narration || "—"}
+                              </td>
+                              <td className="whitespace-nowrap px-5 py-3 text-right font-medium text-slate-900 dark:text-[#F8F4E8]">
+                                {formatCurrency(numericValue(finalAmount))}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
+                  </div>
+                  <div className="space-y-3 p-3 sm:hidden">
+                    {dashboard.vouchers.map((voucher) => {
+                      const finalAmount =
+                        voucher.total_amount ?? voucher.amount ?? 0;
+                      const voucherDate = voucher.date
+                        ? new Date(`${voucher.date}T00:00:00Z`)
+                        : null;
+                      return (
+                        <article
+                          key={voucher.id}
+                          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium text-slate-900 dark:text-slate-100">
+                                {voucher.party_name || voucher.narration || "Voucher"}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                {voucher.voucher_number || "No voucher number"}
+                                {voucherDate && !Number.isNaN(voucherDate.getTime())
+                                  ? ` · ${new Intl.DateTimeFormat("en-IN", {
+                                      dateStyle: "medium",
+                                      timeZone: "UTC",
+                                    }).format(voucherDate)}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <p className="shrink-0 text-right font-semibold text-slate-900 dark:text-finora-gold-light">
+                              {formatCurrency(numericValue(finalAmount))}
+                            </p>
+                          </div>
+                          <span className="mt-3 inline-flex rounded-full bg-finora-gold/10 px-2.5 py-1 text-xs capitalize text-finora-gold-dark dark:text-finora-gold">
+                            {voucher.voucher_type}
+                          </span>
+                        </article>
+                      );
+                    })}
                   </div>
                 </section>
               ) : null}

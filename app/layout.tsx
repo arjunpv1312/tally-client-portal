@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Tally Client Portal",
+  title: "FINORA | Accounting & Business Solutions",
   description:
-    "A secure reporting workspace connecting TallyPrime data with client-facing financial dashboards.",
+    "Secure TallyPrime reporting and financial dashboards by FINORA Accounting & Business Solutions.",
 };
 
 export default function RootLayout({

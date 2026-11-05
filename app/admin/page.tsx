@@ -510,7 +510,7 @@ export default function AdminPage() {
           subtitle="Manage client companies, user access, and team assignments"
         />
         <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-          <section className="grid gap-4 sm:grid-cols-3">
+          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6 lg:grid-cols-4">
             {[
               { label: "Companies", value: companies.length, icon: Building2 },
               { label: "Registered users", value: profiles.length, icon: Users },
@@ -522,13 +522,13 @@ export default function AdminPage() {
             ].map(({ label, value, icon: Icon }) => (
               <div
                 key={label}
-                className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg active:translate-y-0 dark:border-[#334155] dark:bg-[#1E293B] dark:hover:border-[#60A5FA]/40"
+                className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-finora-gold/40 hover:shadow-gold-glow active:scale-95 dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg"
               >
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
                     {label}
                   </p>
-                  <Icon className="h-5 w-5 text-blue-600 dark:text-[#60A5FA]" />
+                  <Icon className="h-5 w-5 text-finora-gold-dark dark:text-finora-gold" />
                 </div>
                 <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
                   {value}
@@ -613,7 +613,7 @@ export default function AdminPage() {
                           </p>
                           <form
                             onSubmit={createCompany}
-                            className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+                            className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
                           >
                             <label>
                               <span className={labelClassName}>Company name</span>
@@ -671,6 +671,51 @@ export default function AdminPage() {
                           count={companies.length}
                           headers={["Company", "GSTIN", "Contact", "Created", ""]}
                           emptyText="No companies have been added yet."
+                          mobileContent={companies.map((company) => (
+                            <article
+                              key={company.id}
+                              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <h4 className="truncate font-semibold text-slate-900 dark:text-slate-100">
+                                    {company.name}
+                                  </h4>
+                                  <p className="mt-1 break-all text-sm text-slate-600 dark:text-slate-300">
+                                    {company.email || "No email"}
+                                  </p>
+                                  {company.phone ? (
+                                    <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                                      {company.phone}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <button
+                                  type="button"
+                                  aria-label={`Delete ${company.name}`}
+                                  disabled={busy}
+                                  onClick={() => void deleteCompany(company)}
+                                  className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-rose-50 hover:text-rose-600 active:scale-95 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
+                                >
+                                  {pendingAction === "company-delete" ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </div>
+                              <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm dark:border-finora-gold/10">
+                                <div>
+                                  <dt className="text-xs text-slate-500 dark:text-slate-400">GSTIN</dt>
+                                  <dd className="mt-0.5 break-all text-slate-800 dark:text-slate-200">{company.gstin || "—"}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-xs text-slate-500 dark:text-slate-400">Created</dt>
+                                  <dd className="mt-0.5 text-slate-800 dark:text-slate-200">{formatDate(company.created_at)}</dd>
+                                </div>
+                              </dl>
+                            </article>
+                          ))}
                         >
                           {companies.map((company) => (
                             <tr key={company.id} className="transition-colors hover:bg-white dark:hover:bg-[#0F172A]/40">
@@ -725,7 +770,7 @@ export default function AdminPage() {
                           </p>
                           <form
                             onSubmit={createUser}
-                            className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+                            className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
                           >
                             <label>
                               <span className={labelClassName}>Full name</span>
@@ -816,6 +861,62 @@ export default function AdminPage() {
                           count={profiles.length}
                           headers={["User", "Email", "Role", "Created", "Status", "Actions"]}
                           emptyText="No user profiles have been created yet."
+                          mobileContent={profiles.map((profile) => (
+                            <article
+                              key={profile.id}
+                              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-finora-gold/25 bg-finora-gold/10 text-sm font-semibold text-finora-gold-dark dark:text-finora-gold">
+                                    {(profile.full_name || profile.email || "?")
+                                      .slice(0, 1)
+                                      .toUpperCase()}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <h4 className="truncate font-semibold text-slate-900 dark:text-slate-100">
+                                      {profile.full_name || "Unnamed user"}
+                                    </h4>
+                                    <p className="break-all text-sm text-slate-600 dark:text-slate-300">
+                                      {profile.email}
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/50 dark:text-sky-300">
+                                  {roleLabel(profile.role)}
+                                </span>
+                              </div>
+                              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs dark:border-finora-gold/10">
+                                <span className="text-slate-500 dark:text-slate-400">Created {formatDate(profile.created_at)}</span>
+                                <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-300">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                  Active
+                                </span>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {profile.role !== "admin" ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => void revokeUserAccess(profile)}
+                                    className={rowActionClassName}
+                                  >
+                                    <UserRoundX className="h-3.5 w-3.5" />
+                                    Revoke access
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void deleteUser(profile)}
+                                  className={rowActionClassName}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Delete account
+                                </button>
+                              </div>
+                            </article>
+                          ))}
                         >
                           {profiles.map((profile) => (
                             <tr key={profile.id} className="transition-colors hover:bg-white dark:hover:bg-[#0F172A]/40">
@@ -894,7 +995,7 @@ export default function AdminPage() {
                           </p>
                           <form
                             onSubmit={createAssignment}
-                            className="mt-4 grid gap-4 sm:grid-cols-3"
+                            className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
                           >
                             <label>
                               <span className={labelClassName}>Employee</span>
@@ -954,6 +1055,60 @@ export default function AdminPage() {
                           count={assignments.length}
                           headers={["Employee", "Company", "Entry status", "Actions"]}
                           emptyText="No employee-company assignments yet."
+                          mobileContent={assignments.map((assignment) => {
+                            const employee = profiles.find(
+                              (profile) => profile.id === assignment.employee_id,
+                            );
+                            const company = companies.find(
+                              (item) => item.id === assignment.company_id,
+                            );
+                            return (
+                              <article
+                                key={assignment.id}
+                                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                              >
+                                <div className="space-y-2">
+                                  <div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">Employee</p>
+                                    <p className="font-medium text-slate-900 dark:text-slate-100">
+                                      {employee?.full_name || employee?.email || "Unknown employee"}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">Company</p>
+                                    <p className="text-sm text-slate-700 dark:text-slate-300">
+                                      {company?.name || "Unknown company"}
+                                    </p>
+                                  </div>
+                                  <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium capitalize text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                    {assignment.entry_status}
+                                  </span>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3 dark:border-finora-gold/10">
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => void removeAssignment(assignment)}
+                                    className={rowActionClassName}
+                                  >
+                                    <UserRoundX className="h-3.5 w-3.5" />
+                                    Revoke
+                                  </button>
+                                  {employee ? (
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => void deleteUser(employee)}
+                                      className={rowActionClassName}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      Delete account
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </article>
+                            );
+                          })}
                         >
                           {assignments.map((assignment) => {
                             const employee = profiles.find(
