@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getBrowserSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { closeEmployeeWorkLog } from "@/lib/employee-work-logs";
 
 const WARNING_AFTER_MS = 25 * 60 * 1000;
 const LOGOUT_AFTER_MS = 30 * 60 * 1000;
@@ -53,6 +54,16 @@ export function IdleTimer() {
       if (loggingOutRef.current) return;
       loggingOutRef.current = true;
       clearTimers();
+
+      try {
+        await closeEmployeeWorkLog();
+      } catch (workLogError) {
+        toast.error(
+          workLogError instanceof Error
+            ? `Unable to close employee work log: ${workLogError.message}`
+            : "Unable to close employee work log.",
+        );
+      }
 
       try {
         const { error } = await supabase.auth.signOut();

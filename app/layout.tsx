@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { IdleTimer } from "@/components/auth/IdleTimer";
+import { EmployeeActivityTracker } from "@/components/auth/EmployeeActivityTracker";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,6 +35,7 @@ export default function RootLayout({
       <body className="min-h-full font-sans">
         <ThemeProvider>
           <IdleTimer />
+          <EmployeeActivityTracker />
           {children}
         </ThemeProvider>
       </body>

@@ -58,6 +58,25 @@ create table if not exists public.company_employees (
 alter table public.company_employees
   add column if not exists entry_status text not null default 'pending';
 
+create table if not exists public.employee_work_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  company_id uuid not null references public.companies (id) on delete cascade,
+  login_time timestamptz not null default now(),
+  logout_time timestamptz,
+  total_hours numeric(8, 2),
+  completed_tasks text[] not null default '{}',
+  pending_work text[] not null default '{}',
+  created_at timestamptz not null default now(),
+  check (logout_time is null or logout_time >= login_time),
+  check (total_hours is null or total_hours >= 0)
+);
+
+create index if not exists employee_work_logs_user_login_idx
+  on public.employee_work_logs (user_id, login_time desc);
+create index if not exists employee_work_logs_company_login_idx
+  on public.employee_work_logs (company_id, login_time desc);
+
 create table if not exists public.vouchers (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies (id) on delete cascade,
@@ -115,6 +134,7 @@ create index if not exists financial_summaries_company_period_idx
 alter table public.profiles enable row level security;
 alter table public.companies enable row level security;
 alter table public.company_employees enable row level security;
+alter table public.employee_work_logs enable row level security;
 alter table public.vouchers enable row level security;
 alter table public.financial_summaries enable row level security;
 
@@ -191,6 +211,42 @@ create policy "Admins can manage company assignments"
   to authenticated
   using (public.is_admin())
   with check (public.is_admin());
+
+drop policy if exists "Employees can read own work logs" on public.employee_work_logs;
+create policy "Employees can read own work logs"
+  on public.employee_work_logs
+  for select
+  to authenticated
+  using (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "Employees can create own work logs" on public.employee_work_logs;
+create policy "Employees can create own work logs"
+  on public.employee_work_logs
+  for insert
+  to authenticated
+  with check (
+    user_id = auth.uid()
+    and exists (
+      select 1
+      from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.role = 'employee'
+    )
+    and exists (
+      select 1
+      from public.company_employees
+      where company_employees.employee_id = auth.uid()
+        and company_employees.company_id = employee_work_logs.company_id
+    )
+  );
+
+drop policy if exists "Employees can update own work logs" on public.employee_work_logs;
+create policy "Employees can update own work logs"
+  on public.employee_work_logs
+  for update
+  to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 
 drop policy if exists "Users can read authorized company vouchers" on public.vouchers;
 create policy "Users can read authorized company vouchers"

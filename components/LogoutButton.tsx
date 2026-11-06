@@ -5,16 +5,23 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getSupabase } from "@/lib/supabase";
 
-export function LogoutButton() {
+export function LogoutButton({
+  onBeforeLogout,
+}: {
+  onBeforeLogout?: () => Promise<boolean>;
+}) {
   const router = useRouter();
 
   async function handleLogout() {
     try {
+      if (onBeforeLogout && !(await onBeforeLogout())) return;
       const supabase = getSupabase();
       const { error } = await supabase.auth.signOut();
       if (error) toast.error(`Logout failed: ${error.message}`);
-    } catch {
-      toast.error("Logout failed. Please try again.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? `Logout failed: ${error.message}` : "Logout failed. Please try again.",
+      );
     } finally {
       router.push("/login");
       router.refresh();

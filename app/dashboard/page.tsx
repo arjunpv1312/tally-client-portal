@@ -14,6 +14,12 @@ import {
   SalesExpensesBarChart,
 } from "@/components/FinancialCharts";
 import { EmptyStateGraphic } from "@/components/ui/EmptyStateGraphic";
+import {
+  DateFilter,
+  getInitialDateRange,
+  type DateRange,
+} from "@/components/dashboard/DateFilter";
+import { ExportButtons } from "@/components/ui/ExportButtons";
 import { getBrowserSupabase, getSupabase } from "@/lib/supabase";
 import type { VoucherSummary } from "@/types";
 
@@ -48,6 +54,7 @@ type VoucherRow = {
   narration: string | null;
   total_amount: number | string | null;
   amount: number | string | null;
+  voucher_date?: string | null;
 };
 
 type DashboardData = {
@@ -81,7 +88,10 @@ function formatPeriod(value: string): string {
   }).format(new Date(year, month - 1, 1));
 }
 
-async function fetchDashboardData(): Promise<DashboardData> {
+async function fetchDashboardData(
+  startDate: string,
+  endDate: string,
+): Promise<DashboardData> {
   const supabase = getSupabase();
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError) throw new Error(userError.message);
@@ -106,14 +116,20 @@ async function fetchDashboardData(): Promise<DashboardData> {
       .eq("id", profile.company_id)
       .maybeSingle(),
   ]);
-  const voucherQuery = (columns: string, orderColumn: string) =>
-    supabase
+  const voucherQuery = (
+    columns: string,
+    orderColumn: string,
+    dateColumn: string,
+  ) => {
+    const query = supabase
       .from("vouchers")
       .select(columns)
       .eq("company_id", profile.company_id)
+      .gte(dateColumn, startDate)
+      .lte(dateColumn, endDate)
       .order(orderColumn, { ascending: false })
-      .limit(10)
-      .returns<
+      .limit(1000);
+    return query.returns<
         {
           id: string;
           total_amount?: number | string | null;
@@ -126,37 +142,47 @@ async function fetchDashboardData(): Promise<DashboardData> {
           voucher_number?: string | null;
         }[]
       >();
+  };
   const voucherVariants = [
     {
       columns:
         "id, total_amount, amount, party_name, voucher_type, date, voucher_date, voucher_number, narration",
       orderColumn: "date",
+      dateColumn: "voucher_date",
     },
     {
       columns:
         "id, total_amount, amount, party_name, voucher_type, date, narration",
       orderColumn: "date",
+      dateColumn: "date",
     },
     {
       columns:
         "id, total_amount, party_name, voucher_type, voucher_date, voucher_number, narration",
       orderColumn: "voucher_date",
+      dateColumn: "voucher_date",
     },
     {
       columns:
         "id, total_amount, voucher_date, voucher_number, voucher_type, party_name",
       orderColumn: "voucher_date",
+      dateColumn: "voucher_date",
     },
     {
       columns: "id, amount, date, voucher_type, party_name, narration",
       orderColumn: "date",
+      dateColumn: "date",
     },
   ];
   let voucherRows: VoucherRow[] = [];
   let voucherWarning: string | null = null;
   for (const variant of voucherVariants) {
     try {
-      const result = await voucherQuery(variant.columns, variant.orderColumn);
+      const result = await voucherQuery(
+        variant.columns,
+        variant.orderColumn,
+        variant.dateColumn,
+      );
       if (!result.error) {
         voucherRows = (result.data ?? []).map((voucher) => ({
           id: voucher.id,
@@ -184,6 +210,8 @@ async function fetchDashboardData(): Promise<DashboardData> {
       .from("financial_summaries")
       .select(columns)
       .eq("company_id", profile.company_id)
+      .gte("period_end", startDate)
+      .lte("period_start", endDate)
       .order("period_start", { ascending: true })
       .returns<SummaryRow[]>();
   const summaryColumnSets = [
@@ -293,6 +321,7 @@ async function fetchDashboardData(): Promise<DashboardData> {
 }
 
 export default function DashboardPage() {
+  const [dateRange, setDateRange] = useState<DateRange>(getInitialDateRange);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -301,7 +330,10 @@ export default function DashboardPage() {
 
   const refreshFromRealtime = useCallback(async () => {
     try {
-      const data = await fetchDashboardData();
+      const data = await fetchDashboardData(
+        dateRange.startDate,
+        dateRange.endDate,
+      );
       setDashboard(data);
       setError("");
       setRealtimeError("");
@@ -313,7 +345,7 @@ export default function DashboardPage() {
       setRealtimeError(message);
       toast.error(`Live dashboard update failed: ${message}`);
     }
-  }, []);
+  }, [dateRange.endDate, dateRange.startDate]);
 
   const chartData = useMemo<VoucherSummary[]>(
     () =>
@@ -336,7 +368,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchDashboardData()
+    void fetchDashboardData(dateRange.startDate, dateRange.endDate)
       .then((data) => {
         if (!cancelled) setDashboard(data);
       })
@@ -356,7 +388,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadVersion]);
+  }, [dateRange.endDate, dateRange.startDate, reloadVersion]);
 
   useEffect(() => {
     const companyId = dashboard?.companyId;
@@ -420,7 +452,10 @@ export default function DashboardPage() {
           identityName={dashboard?.companyName ?? dashboard?.profileName ?? undefined}
           identityLabel="Client company"
           roleLabel="Client"
-          navItems={[{ label: "Overview", href: "/dashboard" }]}
+          navItems={[
+            { label: "Overview", href: "/dashboard" },
+            { label: "GST Reports", href: "/dashboard/gst" },
+          ]}
         />
         <motion.main
           initial={{ opacity: 0, y: 12 }}
@@ -428,6 +463,13 @@ export default function DashboardPage() {
           transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           className="mx-auto max-w-6xl space-y-8 px-4 py-6 transform-gpu will-change-transform sm:px-6 lg:px-8"
         >
+          <DateFilter
+            onChange={(range) => {
+              setLoading(true);
+              setError("");
+              setDateRange(range);
+            }}
+          />
           {loading ? (
             <DashboardContentSkeleton />
           ) : error ? (
@@ -449,6 +491,24 @@ export default function DashboardPage() {
             </section>
           ) : (
             <>
+              <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Showing {dateRange.startDate} through {dateRange.endDate}
+                </p>
+                <ExportButtons
+                  reportTitle="Recent vouchers"
+                  filename="finora-vouchers"
+                  rows={(dashboard?.vouchers ?? []).map((voucher) => ({
+                    Date: voucher.date ?? voucher.voucher_date ?? "",
+                    Voucher: voucher.voucher_number ?? "",
+                    Type: voucher.voucher_type,
+                    Party: voucher.party_name ?? voucher.narration ?? "",
+                    Amount: numericValue(
+                      voucher.total_amount ?? voucher.amount ?? 0,
+                    ),
+                  }))}
+                />
+              </div>
               {latest ? (
                 <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 lg:grid-cols-4">
                   {[

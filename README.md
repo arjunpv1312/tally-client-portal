@@ -59,7 +59,7 @@ variable.
 | Authentication and roles | Supabase Auth, profiles, and role-checked Next.js routes | `proxy.ts` enforces route roles; privileged admin APIs independently verify the access token and admin profile. Route checks do not replace database authorization. |
 | Tenant data access | PostgreSQL Row Level Security | [`supabase/schema.sql`](./supabase/schema.sql) enables RLS and defines user/company/employee and admin policies for the current tables. Test policies against the deployed schema and every role. |
 | Tally data ingestion | Python standard-library worker using TallyPrime XML/HTTP and Supabase REST | Upserts batches of 250 records. Unique constraints cover `(company_id, tally_voucher_id)` and `(company_id, period_start)`; this provides idempotent keys for those records. |
-| Database | PostgreSQL tables, foreign keys, constraints, and indexes | Current schema defines profiles, companies, assignments, vouchers, and summaries. It does not currently define an audit-log table, automatic summary triggers, or `v_company_voucher_totals` view. |
+| Database | PostgreSQL tables, foreign keys, constraints, and indexes | Current schema defines profiles, companies, assignments, employee shift/task work logs, vouchers, and summaries. It does not define a general-purpose audit log, automatic summary triggers, or `v_company_voucher_totals` view. |
 | Frontend | Next.js 16 App Router, React 19, TypeScript, Tailwind CSS, Framer Motion, Recharts | Dashboard subscribes to Supabase Postgres Changes and refreshes data using the authenticated client. This is not a claim that all charts are code-split or that the UI has been independently audited. |
 | Privacy and cryptography | Deployment-dependent | Hosting, TLS versions, encryption at rest, backup retention, and region depend on the configured providers. See [COMPLIANCE.md](./COMPLIANCE.md); this repository does not certify DPDP/GDPR compliance or a particular cipher suite. |
 
@@ -70,11 +70,18 @@ variable.
 - Company-scoped access policies for financial summaries and vouchers.
 - Dashboard visualizations for sales, purchases, expenses, net profit, and GST
   values, including CGST/SGST/IGST values where Tally data is available.
+- Dashboard date presets and custom date ranges, with CSV and print-to-PDF
+  exports for voucher and GST reports.
+- Employee work sessions and end-of-shift task notes, with an Admin activity
+  view; employees can switch among their assigned companies.
+- An Admin company preview for viewing a selected company's live financial
+  summaries and recent vouchers.
 - Supabase Postgres Changes subscriptions to refresh client dashboards after
   voucher or summary changes.
 - Idempotent sync upserts using database uniqueness constraints.
 
-The repository does not currently implement a dedicated audit-log system.
+Employee work logs record shift sessions and task notes; they are not a
+general-purpose audit trail of administrative or financial changes.
 RLS, CI checks, and governance documents are controls and process evidence, not
 an independent security audit or compliance certification. See
 [`SECURITY.md`](./SECURITY.md) for disclosure guidance and known boundaries.
@@ -93,7 +100,7 @@ an independent security audit or compliance certification. See
 
 The login screen asks the user to select Admin, Employee, or Client. The selected tab is checked against the signed-in user's `profiles.role`; successful sessions are routed to `/admin`, `/employee`, or `/dashboard`. Database RLS policies remain authoritative even when a route is hidden or guarded in the UI.
 
-Authenticated sessions display an inactivity warning after 25 minutes and sign out locally after 30 minutes without activity. Mouse movement, keyboard input, scrolling, touch, or a click resets the idle timer. This is a client-side session convenience and does not replace server-side authorization or the Supabase session's own expiry.
+Authenticated sessions display an inactivity warning after 25 minutes and sign out locally after 30 minutes without activity. Mouse movement, keyboard input, scrolling, touch, or a click resets the idle timer. This is a client-side session convenience and does not replace server-side authorization or the Supabase session's own expiry. Employee session tracking and task logging require the current [`supabase/schema.sql`](./supabase/schema.sql) to be applied to the Supabase project.
 
 ## Technology
 
@@ -138,7 +145,7 @@ The browser uses the public project URL and anon/publishable key. The service-ro
 ### 3. Initialize Supabase
 
 1. Open the Supabase project **SQL Editor**.
-2. Run [`supabase/schema.sql`](./supabase/schema.sql). It creates profile, company, employee-assignment, voucher, and financial-summary structures and configures RLS policies. Re-running the SQL safely adds the reporting tables and policies.
+2. Run [`supabase/schema.sql`](./supabase/schema.sql). It creates profile, company, employee-assignment, employee work-log, voucher, and financial-summary structures and configures RLS policies. Re-running the SQL safely adds the reporting tables and policies.
 3. In **Authentication → Users**, create the first administrator.
 4. Copy the new Auth user's UUID, then run the bootstrap `INSERT` at the end of `schema.sql` with that UUID, email, and an administrator display name.
 5. Sign in at `/login` using the Admin role tab.

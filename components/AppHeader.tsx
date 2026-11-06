@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Menu, X } from "lucide-react";
 import { LogoutButton } from "@/components/LogoutButton";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -23,6 +23,8 @@ type AppHeaderProps = {
   roleLabel?: string;
   navItems?: HeaderNavItem[];
   activeNavItem?: string;
+  contextControl?: ReactNode;
+  onLogoutRequest?: () => Promise<boolean>;
 };
 
 function initials(name: string) {
@@ -42,6 +44,8 @@ export function AppHeader({
   roleLabel,
   navItems = [],
   activeNavItem,
+  contextControl,
+  onLogoutRequest,
 }: AppHeaderProps) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -122,6 +126,9 @@ export function AppHeader({
       </nav>
 
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+        {contextControl ? (
+          <div className="hidden sm:block">{contextControl}</div>
+        ) : null}
         {roleLabel ? (
           <span className="hidden rounded-full border border-finora-gold/25 bg-finora-gold/10 px-2.5 py-1 text-xs font-medium text-finora-gold-dark dark:text-finora-gold-light md:inline-flex">
             {roleLabel}
@@ -149,7 +156,7 @@ export function AppHeader({
         ) : null}
         <ThemeToggle />
         <span className="hidden md:inline-flex">
-          <LogoutButton />
+          <LogoutButton onBeforeLogout={onLogoutRequest} />
         </span>
         <button
           type="button"
@@ -246,8 +253,11 @@ export function AppHeader({
                   ),
                 )}
               </nav>
+              {contextControl ? (
+                <div className="mt-4">{contextControl}</div>
+              ) : null}
               <div className="mt-auto border-t border-finora-gold/15 pt-4">
-                <LogoutButton />
+                <LogoutButton onBeforeLogout={onLogoutRequest} />
               </div>
             </motion.aside>
           </>

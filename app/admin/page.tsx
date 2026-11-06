@@ -6,6 +6,8 @@ import {
   Check,
   ClipboardList,
   Copy,
+  Clock3,
+  Eye,
   Loader2,
   Plus,
   Trash2,
@@ -17,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
 import { AdminSkeleton } from "@/components/admin/AdminSkeleton";
+import { CompanyDashboardPreview } from "@/components/admin/CompanyDashboardPreview";
 import { AuthGuard } from "@/components/AuthGuard";
 import { getBrowserSupabase } from "@/lib/supabase";
 import type { Profile, UserRole } from "@/types";
@@ -38,13 +41,24 @@ type Assignment = {
   entry_status: string;
 };
 
-type Tab = "companies" | "users" | "assignments";
+type Tab = "companies" | "users" | "assignments" | "employee-activity";
 type DirectoryErrors = Partial<Record<Tab, string>>;
+type EmployeeWorkLog = {
+  id: string;
+  user_id: string;
+  company_id: string;
+  login_time: string;
+  logout_time: string | null;
+  total_hours: number | string | null;
+  completed_tasks: string[] | null;
+  pending_work: string[] | null;
+};
 
 const tabs: { id: Tab; label: string; icon: typeof Building2 }[] = [
   { id: "companies", label: "Companies", icon: Building2 },
   { id: "users", label: "Users", icon: Users },
   { id: "assignments", label: "Assignments", icon: ClipboardList },
+  { id: "employee-activity", label: "Employee Activity", icon: Clock3 },
 ];
 
 const inputClassName =
@@ -116,6 +130,8 @@ export default function AdminPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [workLogs, setWorkLogs] = useState<EmployeeWorkLog[]>([]);
+  const [previewCompany, setPreviewCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -187,6 +203,14 @@ export default function AdminPage() {
     if (assignmentResult.error) {
       assignmentResult = await assignmentQuery(assignmentVariants[3]);
     }
+    const workLogResult = await supabase
+      .from("employee_work_logs")
+      .select(
+        "id, user_id, company_id, login_time, logout_time, total_hours, completed_tasks, pending_work",
+      )
+      .order("login_time", { ascending: false })
+      .limit(250)
+      .returns<EmployeeWorkLog[]>();
     setAssignmentWarning(
       !assignmentResult.error && !hasStatusColumn
         ? "The entry_status column is unavailable; assignments are shown as Active until the schema is updated."
@@ -200,6 +224,9 @@ export default function AdminPage() {
       ...(profileResult.error ? { users: profileResult.error.message } : {}),
       ...(assignmentResult.error
         ? { assignments: assignmentResult.error.message }
+        : {}),
+      ...(workLogResult.error
+        ? { "employee-activity": workLogResult.error.message }
         : {}),
     });
     if (!companyResult.error) {
@@ -224,6 +251,7 @@ export default function AdminPage() {
         };
       }),
     );
+    if (!workLogResult.error) setWorkLogs(workLogResult.data ?? []);
   }, []);
 
   useEffect(() => {
@@ -790,13 +818,21 @@ export default function AdminPage() {
                         <DataTable
                           title="Company directory"
                           count={companies.length}
-                          headers={["Company", "Company ID", "GSTIN", "Contact", "Created", ""]}
+                          headers={["Company", "Company ID", "GSTIN", "Contact", "Created", "Actions"]}
                           emptyText="No companies have been added yet."
                           mobileContent={companies.map((company) => (
                             <article
                               key={company.id}
                               className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-500/40 hover:shadow-lg active:translate-y-0 dark:border-finora-gold/15 dark:bg-finora-dark/50"
                             >
+                              <button
+                                type="button"
+                                onClick={() => setPreviewCompany(company)}
+                                className="mb-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-blue-200 px-3 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                Inspect Dashboard
+                              </button>
                               <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 dark:border-finora-gold/10">
                                 <span
                                   title={company.id}
@@ -906,20 +942,30 @@ export default function AdminPage() {
                                 {formatDate(company.created_at)}
                               </td>
                               <td className="px-4 py-3 text-right">
-                                <button
-                                  type="button"
-                                  title={`Delete ${company.name}`}
-                                  aria-label={`Delete ${company.name}`}
-                                  disabled={busy}
-                                  onClick={() => void deleteCompany(company)}
-                                  className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
-                                >
-                                  {pendingAction === "company-delete" ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="h-4 w-4" />
-                                  )}
-                                </button>
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewCompany(company)}
+                                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-blue-200 px-2.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                    Inspect Dashboard
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title={`Delete ${company.name}`}
+                                    aria-label={`Delete ${company.name}`}
+                                    disabled={busy}
+                                    onClick={() => void deleteCompany(company)}
+                                    className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
+                                  >
+                                    {pendingAction === "company-delete" ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -1365,12 +1411,98 @@ export default function AdminPage() {
                         </DataTable>
                       </div>
                     )}
+                    {activeTab === "employee-activity" && (
+                      <div className="space-y-4">
+                        <DirectoryError
+                          message={directoryErrors["employee-activity"]}
+                        />
+                        <DataTable
+                          title="Employee activity (latest 250 sessions)"
+                          count={workLogs.length}
+                          headers={[
+                            "Employee",
+                            "Company",
+                            "Login",
+                            "Logout",
+                            "Hours",
+                            "Completed tasks",
+                            "Pending work",
+                          ]}
+                          emptyText="No employee work sessions have been recorded."
+                          mobileContent={workLogs.map((log) => (
+                            <article
+                              key={log.id}
+                              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+                            >
+                              <p className="font-semibold">
+                                {profiles.find((profile) => profile.id === log.user_id)?.full_name ??
+                                  profiles.find((profile) => profile.id === log.user_id)?.email ??
+                                  "Unknown employee"}
+                              </p>
+                              <p className="text-sm text-slate-500">
+                                {companies.find((company) => company.id === log.company_id)?.name ??
+                                  "Unknown company"}
+                              </p>
+                              <p className="mt-2 text-xs">
+                                {formatDateTime(log.login_time)} →{" "}
+                                {log.logout_time ? formatDateTime(log.logout_time) : "Active"}
+                                {" · "}
+                                {log.total_hours == null ? "—" : `${log.total_hours} h`}
+                              </p>
+                              <TaskBadges
+                                completed={log.completed_tasks ?? []}
+                                pending={log.pending_work ?? []}
+                              />
+                            </article>
+                          ))}
+                        >
+                          {workLogs.map((log) => {
+                            const employee = profiles.find(
+                              (profile) => profile.id === log.user_id,
+                            );
+                            const company = companies.find(
+                              (item) => item.id === log.company_id,
+                            );
+                            return (
+                              <tr key={log.id} className="align-top transition-colors hover:bg-blue-50/60 dark:hover:bg-[#0F172A]/40">
+                                <td className="px-4 py-3">
+                                  <p className="font-medium text-slate-900 dark:text-slate-100">
+                                    {employee?.full_name ?? "Unknown employee"}
+                                  </p>
+                                  <p className="text-xs text-slate-500">{employee?.email ?? "—"}</p>
+                                </td>
+                                <td className="px-4 py-3">{company?.name ?? "Unknown company"}</td>
+                                <td className="px-4 py-3 whitespace-nowrap">{formatDateTime(log.login_time)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  {log.logout_time ? formatDateTime(log.logout_time) : "Active"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {log.total_hours == null ? "—" : `${log.total_hours} h`}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <TaskBadges completed={log.completed_tasks ?? []} pending={[]} />
+                                </td>
+                                <td className="px-4 py-3">
+                                  <TaskBadges completed={[]} pending={log.pending_work ?? []} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </DataTable>
+                      </div>
+                    )}
                 </motion.div>
               </AnimatePresence>
             </div>
           </section>
         </motion.main>
       </div>
+      {previewCompany ? (
+        <CompanyDashboardPreview
+          company={previewCompany}
+          onClose={() => setPreviewCompany(null)}
+        />
+      ) : null}
     </AuthGuard>
   );
 }
@@ -1452,5 +1584,46 @@ function DirectoryError({ message }: { message?: string }) {
     >
       Admin data warning: {message}
     </div>
+  );
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function TaskBadges({
+  completed,
+  pending,
+}: {
+  completed: string[];
+  pending: string[];
+}) {
+  const items = [
+    ...completed.map((task) => ({ task, status: "done" })),
+    ...pending.map((task) => ({ task, status: "pending" })),
+  ];
+  return items.length ? (
+    <div className="flex max-w-sm flex-wrap gap-1.5">
+      {items.map(({ task, status }, index) => (
+        <span
+          key={`${status}-${task}-${index}`}
+          title={task}
+          className={`max-w-40 truncate rounded-full px-2 py-1 text-[11px] ${
+            status === "done"
+              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+              : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+          }`}
+        >
+          {task}
+        </span>
+      ))}
+    </div>
+  ) : (
+    <span className="text-xs text-slate-400">None</span>
   );
 }
