@@ -5,6 +5,7 @@ import {
   Building2,
   Check,
   ClipboardList,
+  Copy,
   Loader2,
   Plus,
   Trash2,
@@ -97,6 +98,19 @@ function roleLabel(role: UserRole) {
   return role === "company" ? "Client" : role === "employee" ? "Employee" : "Admin";
 }
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
+const supabaseProjectRef = (() => {
+  if (!supabaseUrl) return "";
+  try {
+    const hostname = new URL(supabaseUrl).hostname;
+    return hostname.endsWith(".supabase.co")
+      ? hostname.slice(0, -".supabase.co".length)
+      : "";
+  } catch {
+    return "";
+  }
+})();
+
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<Tab>("companies");
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -115,6 +129,19 @@ export default function AdminPage() {
     () => profiles.filter((profile) => profile.role === "employee"),
     [profiles],
   );
+  async function copyToClipboard(value: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(successMessage);
+    } catch (copyError) {
+      toast.error(
+        copyError instanceof Error
+          ? `Unable to copy to clipboard: ${copyError.message}`
+          : "Unable to copy to clipboard. Check your browser permissions.",
+      );
+    }
+  }
+
   const refreshDirectory = useCallback(async () => {
     const supabase = getBrowserSupabase();
     const [companyResult, profileResult] = await Promise.all([
@@ -525,6 +552,70 @@ export default function AdminPage() {
           transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           className="mx-auto max-w-7xl space-y-6 px-4 py-6 transform-gpu will-change-transform sm:px-6 lg:px-8"
         >
+          <section className="rounded-2xl border border-slate-200 bg-[#0F172A] p-5 text-white shadow-lg dark:border-finora-gold/20 dark:bg-finora-surface/90 sm:p-6">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">
+                  Tally Integration &amp; Project Config
+                </h2>
+                <p className="mt-1 text-sm text-slate-300">
+                  Use these public project settings when configuring your local
+                  sync worker. Never share a service-role key in the browser.
+                </p>
+                <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Supabase Project ID / Reference
+                    </dt>
+                    <dd className="mt-1 break-all font-mono text-sm">
+                      {supabaseProjectRef || "Not available"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      API Endpoint
+                    </dt>
+                    <dd className="mt-1 break-all font-mono text-sm">
+                      {supabaseUrl || "Not configured"}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+              <button
+                type="button"
+                disabled={!supabaseUrl}
+                onClick={() =>
+                  void copyToClipboard(
+                    `SUPABASE_PROJECT_REF=${supabaseProjectRef}\nSUPABASE_URL=${supabaseUrl}\nTALLY_HOST=http://localhost:9000`,
+                    "Copied project config!",
+                  )
+                }
+                className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Copy className="h-4 w-4" />
+                Copy Project Config
+              </button>
+            </div>
+            <div className="mt-5 grid gap-3 border-t border-white/10 pt-5 sm:grid-cols-3">
+              {[
+                "Copy your Company ID from the Companies list below.",
+                "Open TallyPrime with its XML server available on port 9000.",
+                "Run python tally_sync.py or double-click run_sync.bat.",
+              ].map((step, index) => (
+                <div key={step} className="flex gap-3 text-sm text-slate-200">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-finora-gold font-semibold text-slate-950">
+                    {index + 1}
+                  </span>
+                  <p>{step}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 text-xs text-slate-400">
+              The sync service-role key must be configured securely on the
+              computer running the sync. It is never displayed or copied here.
+            </p>
+          </section>
+
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6 lg:grid-cols-4">
             {[
               { label: "Companies", value: companies.length, icon: Building2 },
@@ -684,13 +775,36 @@ export default function AdminPage() {
                         <DataTable
                           title="Company directory"
                           count={companies.length}
-                          headers={["Company", "GSTIN", "Contact", "Created", ""]}
+                          headers={["Company", "Company ID", "GSTIN", "Contact", "Created", ""]}
                           emptyText="No companies have been added yet."
                           mobileContent={companies.map((company) => (
                             <article
                               key={company.id}
-                              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-500/40 hover:shadow-lg active:translate-y-0 dark:border-finora-gold/15 dark:bg-finora-dark/50"
                             >
+                              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 dark:border-finora-gold/10">
+                                <span
+                                  title={company.id}
+                                  className="rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                >
+                                  {company.id.slice(0, 8)}...
+                                </span>
+                                <button
+                                  type="button"
+                                  title="Paste this Company ID into your local tally_sync.py or .env file to sync data."
+                                  aria-label={`Copy ID for Tally Sync for ${company.name}`}
+                                  onClick={() =>
+                                    void copyToClipboard(
+                                      company.id,
+                                      "Copied Company ID!",
+                                    )
+                                  }
+                                  className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition hover:border-blue-500/40 hover:bg-blue-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                  Copy ID for Tally Sync
+                                </button>
+                              </div>
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <h4 className="truncate font-semibold text-slate-900 dark:text-slate-100">
@@ -733,9 +847,34 @@ export default function AdminPage() {
                           ))}
                         >
                           {companies.map((company) => (
-                            <tr key={company.id} className="transition-colors hover:bg-white dark:hover:bg-[#0F172A]/40">
+                            <tr key={company.id} className="transition-colors hover:bg-blue-50/60 dark:hover:bg-[#0F172A]/40">
                               <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                                 {company.name}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex min-w-56 items-center gap-2">
+                                  <span
+                                    title={company.id}
+                                    className="rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  >
+                                    {company.id.slice(0, 8)}...
+                                  </span>
+                                  <button
+                                    type="button"
+                                    title="Paste this Company ID into your local tally_sync.py or .env file to sync data."
+                                    aria-label={`Copy ID for Tally Sync for ${company.name}`}
+                                    onClick={() =>
+                                      void copyToClipboard(
+                                        company.id,
+                                        "Copied Company ID!",
+                                      )
+                                    }
+                                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 transition hover:border-blue-500/40 hover:bg-blue-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    Copy ID
+                                  </button>
+                                </div>
                               </td>
                               <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                                 {company.gstin || "—"}
@@ -879,7 +1018,7 @@ export default function AdminPage() {
                           mobileContent={profiles.map((profile) => (
                             <article
                               key={profile.id}
-                              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-500/40 hover:shadow-lg active:translate-y-0 dark:border-finora-gold/15 dark:bg-finora-dark/50"
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="flex min-w-0 items-center gap-3">
@@ -916,8 +1055,14 @@ export default function AdminPage() {
                                     onClick={() => void revokeUserAccess(profile)}
                                     className={rowActionClassName}
                                   >
-                                    <UserRoundX className="h-3.5 w-3.5" />
-                                    Revoke access
+                                    {pendingAction === "access-revoke" ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <UserRoundX className="h-3.5 w-3.5" />
+                                    )}
+                                    {pendingAction === "access-revoke"
+                                      ? "Revoking Access..."
+                                      : "Revoke access"}
                                   </button>
                                 ) : null}
                                 <button
@@ -926,15 +1071,21 @@ export default function AdminPage() {
                                   onClick={() => void deleteUser(profile)}
                                   className={rowActionClassName}
                                 >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  Delete account
+                                  {pendingAction === "user-delete" ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  )}
+                                  {pendingAction === "user-delete"
+                                    ? "Deleting Account..."
+                                    : "Delete account"}
                                 </button>
                               </div>
                             </article>
                           ))}
                         >
                           {profiles.map((profile) => (
-                            <tr key={profile.id} className="transition-colors hover:bg-white dark:hover:bg-[#0F172A]/40">
+                            <tr key={profile.id} className="transition-colors hover:bg-blue-50/60 dark:hover:bg-[#0F172A]/40">
                               <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                                 {profile.full_name || "—"}
                               </td>
@@ -1080,7 +1231,7 @@ export default function AdminPage() {
                             return (
                               <article
                                 key={assignment.id}
-                                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-500/40 hover:shadow-lg active:translate-y-0 dark:border-finora-gold/15 dark:bg-finora-dark/50"
                               >
                                 <div className="space-y-2">
                                   <div>
@@ -1106,8 +1257,14 @@ export default function AdminPage() {
                                     onClick={() => void removeAssignment(assignment)}
                                     className={rowActionClassName}
                                   >
-                                    <UserRoundX className="h-3.5 w-3.5" />
-                                    Revoke
+                                    {pendingAction === "assignment-revoke" ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <UserRoundX className="h-3.5 w-3.5" />
+                                    )}
+                                    {pendingAction === "assignment-revoke"
+                                      ? "Revoking Access..."
+                                      : "Revoke"}
                                   </button>
                                   {employee ? (
                                     <button
@@ -1116,8 +1273,14 @@ export default function AdminPage() {
                                       onClick={() => void deleteUser(employee)}
                                       className={rowActionClassName}
                                     >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                      Delete account
+                                      {pendingAction === "user-delete" ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      )}
+                                      {pendingAction === "user-delete"
+                                        ? "Deleting Account..."
+                                        : "Delete account"}
                                     </button>
                                   ) : null}
                                 </div>
@@ -1133,7 +1296,7 @@ export default function AdminPage() {
                               (item) => item.id === assignment.company_id,
                             );
                             return (
-                              <tr key={assignment.id} className="transition-colors hover:bg-white dark:hover:bg-[#0F172A]/40">
+                              <tr key={assignment.id} className="transition-colors hover:bg-blue-50/60 dark:hover:bg-[#0F172A]/40">
                                 <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                                   {employee?.full_name || employee?.email || "Unknown employee"}
                                 </td>

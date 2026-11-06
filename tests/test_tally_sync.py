@@ -1,16 +1,21 @@
 import unittest
+import os
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.error import URLError
 from urllib.request import Request
 from unittest.mock import patch
 
 from tally_sync import (
     SyncError,
+    _load_env_file,
     _http_request,
     _voucher_row,
     _validate_supabase_url,
+    _validate_tally_url,
     build_daybook_request,
     parse_daybook_xml,
     summarize_vouchers,
@@ -135,6 +140,33 @@ class TallySyncTests(unittest.TestCase):
         )
         with self.assertRaises(SyncError):
             _validate_supabase_url("http://localhost.evil.test")
+
+    def test_validates_tally_host(self) -> None:
+        self.assertEqual(
+            _validate_tally_url("http://localhost:9000/"),
+            "http://localhost:9000",
+        )
+        with self.assertRaises(SyncError):
+            _validate_tally_url("http://localhost:9000/path")
+
+    def test_loads_env_file_without_overriding_existing_environment(self) -> None:
+        with TemporaryDirectory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(
+                'SUPABASE_URL="https://env.supabase.co"\n'
+                "TALLY_COMPANY_NAME=Acme Traders\n",
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"SUPABASE_URL": "https://existing.supabase.co"},
+                clear=True,
+            ):
+                _load_env_file(env_path)
+                self.assertEqual(
+                    os.environ["SUPABASE_URL"], "https://existing.supabase.co"
+                )
+                self.assertEqual(os.environ["TALLY_COMPANY_NAME"], "Acme Traders")
 
 
 if __name__ == "__main__":

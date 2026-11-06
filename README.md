@@ -163,23 +163,31 @@ npm run build
 
 ### Enable the local XML/HTTP listener
 
-1. Open the target company in TallyPrime and enable its HTTP/XML server in the connectivity settings. Menu labels can differ by release.
-2. Set the listener port to **9000** and enable ODBC only if the integration requires it.
-3. On the same machine, confirm TallyPrime is reachable at `http://localhost:9000`.
-4. Ensure the local firewall permits the intended sync process. Do **not** port-forward this listener or expose it to the public internet.
-5. Validate the request and XML response locally before connecting any uploader.
+1. Open the target company in TallyPrime and enable its HTTP/XML server in the connectivity settings. Menu labels vary by TallyPrime release.
+2. Set the listener port to **9000**.
+3. On the same machine that will run the sync, confirm TallyPrime is reachable at `http://localhost:9000`.
+4. Ensure the local firewall permits the sync process. Do **not** port-forward this listener or expose it to the public internet.
+
+### Find the FINORA company ID
+
+In FINORA, sign in as an administrator and find the company in the **Companies** tab. Use its database UUID as `TALLY_COMPANY_ID`; do not use the company name in that field. The UUID identifies the company row used to associate synced vouchers and summaries.
 
 ### Configure and run `tally_sync.py`
 
-Set these variables in the sync process environment. Keep the service-role key secret and use a database company UUID from the `companies` table.
+Create a `.env` file next to `tally_sync.py` from [`.env.example`](./.env.example). The launcher can create it for you. Set the following values:
 
-```powershell
-$env:SUPABASE_URL = "https://<project-ref>.supabase.co"
-$env:SUPABASE_SERVICE_ROLE_KEY = "<server-only-service-role-key>"
-$env:TALLY_COMPANY_ID = "<company-uuid>"
-$env:TALLY_COMPANY_NAME = "<exact-company-name-in-TallyPrime>"
-$env:TALLY_EXPENSE_LEDGER_NAMES = "Office Rent,Professional Fees"
+```dotenv
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<server-only-service-role-key>
+TALLY_HOST=http://localhost:9000
+TALLY_COMPANY_ID=<company-uuid-from-the-FINORA-Companies-tab>
+TALLY_COMPANY_NAME=<exact-company-name-open-in-TallyPrime>
+TALLY_EXPENSE_LEDGER_NAMES=Office Rent,Professional Fees
 ```
+
+The sync worker reads `.env` without requiring an additional Python package; already-set process environment variables take precedence. `TALLY_HOST` defaults to `http://localhost:9000`. Use `TALLY_COMPANY_ID` for the company UUID; `TARGET_COMPANY_ID` is not read. The worker also requires the exact open Tally company name in `TALLY_COMPANY_NAME`.
+
+The service-role key bypasses RLS. Keep it only in the trusted sync computer's ignored `.env` file or another protected secret store; never share it through the Admin UI, commit it, or include it in screenshots or chat. The sync URL must use HTTPS except for local development Supabase.
 
 `TALLY_EXPENSE_LEDGER_NAMES` is an explicit comma-separated allowlist of Tally ledgers used to classify payment entries as expenses. Payment vouchers are **not** assumed to be expenses because they may settle purchases or liabilities. Configure the ledger names to match the Tally company; otherwise payment expense totals remain zero. Purchase amounts are reported separately from classified payment expenses to avoid automatically double-counting purchase settlements.
 
@@ -191,7 +199,22 @@ Run the sync manually after enabling Tally's local XML/HTTP listener:
 py -3 .\tally_sync.py
 ```
 
-The worker exports the Day Book from `http://localhost:9000`, validates XML and dates, upserts vouchers on `(company_id, tally_voucher_id)`, then upserts monthly summaries. Network failures are retried; credentials and voucher payloads are not printed to logs. Set the environment variables for the same Windows account that runs the scheduled task.
+Or on Windows, double-click [`run_sync.bat`](./run_sync.bat). On first run it creates `.env` from `.env.example` and opens it for configuration. Save the settings and run the launcher again.
+
+On success, the worker prints a line in this format:
+
+```text
+Tally sync complete: <voucher-count> vouchers and <summary-count> monthly summaries upserted.
+```
+
+The worker exports the Day Book from `http://localhost:9000`, validates XML and dates, upserts vouchers on `(company_id, tally_voucher_id)`, then upserts monthly summaries. Network failures are retried; credentials and voucher payloads are not printed. Re-running the sync uses the database uniqueness constraints to update existing records rather than creating duplicate vouchers.
+
+### Verify data in FINORA
+
+1. In Supabase, verify that `vouchers` and `financial_summaries` contain rows for the configured `company_id`.
+2. Sign in to FINORA as a **Client** account whose `profiles.company_id` matches that company, then open `/dashboard`. Employee accounts use `/employee`; the client financial dashboard is for company-role accounts.
+3. Check that the metric cards, charts, and recent vouchers show the imported data. Summary values depend on the source vouchers and configured expense ledgers.
+4. Keep `/dashboard` open and run the sync again. The dashboard subscribes to Supabase Postgres Changes and refreshes when voucher or summary records change. This requires the Supabase Realtime publication/configuration to include the relevant tables.
 
 Register a daily 3:00 AM Task Scheduler job from PowerShell:
 
@@ -205,10 +228,51 @@ The financial summary is calculated from sales and purchase voucher net amounts,
 
 Never place a service-role key in the script source, browser bundle, or a checked-in configuration file.
 
+### Local tests and mock server
+
+The repository includes Python unit tests for XML parsing, voucher classification, and summary calculations:
+
+```powershell
+py -3 -m unittest discover -s tests -p "test_*.py"
+```
+
+These tests use local fixtures and do not connect to TallyPrime or Supabase. A `scripts/mock_tally_server.py` is not currently included, so the two-terminal mock-server procedure requires a separate mock server and is not runnable from this repository as-is.
+
+## Non-Technical Setup Guide (For Business Owners & Accountants)
+
+You do not need Supabase dashboard access to find your company identifier or run an already-configured FINORA sync. An administrator must securely provision the sync computer with the Supabase service-role key; FINORA never displays or copies this privileged secret in the Admin Portal.
+
+### Step 1: Get your Company ID and project settings
+
+1. Sign in to your FINORA Admin Portal (for example, `https://your-portal-domain.com/admin`).
+2. Open the **Companies** tab.
+3. Use **Copy ID** beside your company. The full UUID is copied to your clipboard.
+4. Use **Copy Project Config** at the top of the Admin page for the public Supabase URL and the local Tally endpoint.
+
+### Step 2: Configure local sync
+
+1. On the computer that runs TallyPrime, open the FINORA sync project folder.
+2. Double-click `run_sync.bat`. On first launch, it creates `.env` from `.env.example` and opens the file.
+3. Set `SUPABASE_URL` and `TALLY_HOST` from the copied project config.
+4. Paste the Company ID into `TALLY_COMPANY_ID` (not `TARGET_COMPANY_ID`).
+5. Enter the exact company name open in TallyPrime as `TALLY_COMPANY_NAME`.
+6. Ask your system administrator to provision `SUPABASE_SERVICE_ROLE_KEY` securely on this computer. Never paste this secret into the Admin Portal, a public issue, or a chat.
+7. Save `.env`. It is ignored by Git and must not be sent to anyone.
+
+### Step 3: Run and verify sync
+
+1. Open the correct company in TallyPrime and ensure its XML/HTTP service is running on port `9000`.
+2. Double-click `run_sync.bat` again. The window reports a success count or an error to help troubleshoot.
+3. A client account linked to the same company can open `/dashboard` to view its financial reports. For configuration and troubleshooting, see [TallyPrime connection protocol](#tallyprime-connection-protocol).
+
+Do not expose TallyPrime's local HTTP listener to the public internet. If the launcher reports an error, ask the administrator to verify the local `.env`, the company UUID, and that TallyPrime is open on the sync computer.
+
 ## Repository layout
 
 ```text
 tally-client-portal/
+├── .env.example                      # Safe template for local Tally sync configuration
+├── .github/workflows/ci.yml          # TypeScript, lint, sync tests, and build checks
 ├── app/
 │   ├── admin/page.tsx                 # Company, account, and assignment management
 │   ├── api/admin/create-user/route.ts # Server-side account provisioning
@@ -227,6 +291,7 @@ tally-client-portal/
 ├── scripts/                           # Windows sync scheduling
 ├── supabase/
 │   └── schema.sql                     # Tables, relationships, and RLS policies
+├── run_sync.bat                       # Windows one-click sync launcher
 ├── tally_sync.py                      # TallyPrime to Supabase sync worker
 ├── tests/test_tally_sync.py            # XML parsing and summary tests
 ├── types/                             # Shared TypeScript types

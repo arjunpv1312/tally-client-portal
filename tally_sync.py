@@ -18,6 +18,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from pathlib import Path
 from typing import Any
 
 
@@ -368,9 +369,10 @@ def fetch_tally_daybook(
     to_date: date,
     retries: int,
     timeout: int,
+    tally_url: str = TALLY_URL,
 ) -> bytes:
     request = urllib.request.Request(
-        TALLY_URL,
+        tally_url,
         data=build_daybook_request(company_name, from_date, to_date),
         headers={"Content-Type": "application/xml; charset=utf-8"},
         method="POST",
@@ -485,7 +487,49 @@ def _validate_supabase_url(value: str) -> str:
     )
 
 
+def _validate_tally_url(value: str) -> str:
+    parsed = urllib.parse.urlsplit(value)
+    if (
+        parsed.scheme in {"http", "https"}
+        and parsed.hostname
+        and not parsed.username
+        and not parsed.password
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+    ):
+        return value.rstrip("/")
+    raise SyncError("TALLY_HOST must be an HTTP(S) URL without a path or credentials.")
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except OSError as error:
+        raise SyncError("Unable to read the local .env configuration file.") from error
+
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            raise SyncError(f"Invalid .env entry on line {line_number}.")
+        name, value = stripped.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise SyncError(f"Invalid .env variable name on line {line_number}.")
+        if value.startswith(("'", '"')) or value.endswith(("'", '"')):
+            if len(value) < 2 or value[0] != value[-1] or value[0] not in {"'", '"'}:
+                raise SyncError(f"Unmatched quotes in .env entry on line {line_number}.")
+            value = value[1:-1]
+        os.environ.setdefault(name, value)
+
+
 def run_sync() -> tuple[int, int]:
+    _load_env_file(Path(__file__).with_name(".env"))
     supabase_url_setting = (
         os.environ.get("SUPABASE_URL")
         or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
@@ -494,6 +538,9 @@ def run_sync() -> tuple[int, int]:
     if not supabase_url_setting:
         raise SyncError("Required environment variable SUPABASE_URL is missing.")
     supabase_url = _validate_supabase_url(supabase_url_setting)
+    tally_url = _validate_tally_url(
+        os.environ.get("TALLY_HOST", TALLY_URL).strip()
+    )
     service_key = _required_environment("SUPABASE_SERVICE_ROLE_KEY")
     company_id = _required_environment("TALLY_COMPANY_ID")
     try:
@@ -523,7 +570,7 @@ def run_sync() -> tuple[int, int]:
         if name.strip()
     }
     tally_xml = fetch_tally_daybook(
-        company_name, from_date, to_date, retries, timeout
+        company_name, from_date, to_date, retries, timeout, tally_url
     )
     vouchers = parse_daybook_xml(tally_xml, expenses)
     summaries = summarize_vouchers(vouchers)
