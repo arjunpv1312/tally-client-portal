@@ -202,7 +202,9 @@ export default function AdminPage() {
         ? { assignments: assignmentResult.error.message }
         : {}),
     });
-    setCompanies((companyResult.data ?? []) as Company[]);
+    if (!companyResult.error) {
+      setCompanies((companyResult.data ?? []) as Company[]);
+    }
     setProfiles((profileResult.data ?? []) as Profile[]);
     setAssignments(
       (assignmentResult.data ?? []).map((assignment) => {
@@ -266,15 +268,28 @@ export default function AdminPage() {
 
     try {
       const formData = new FormData(form);
-      const { error: insertError } = await getBrowserSupabase()
-        .from("companies")
-        .insert({
-          name: String(formData.get("name") ?? "").trim(),
-          gstin: String(formData.get("gstin") ?? "").trim() || null,
-          email: String(formData.get("email") ?? "").trim() || null,
-          phone: String(formData.get("phone") ?? "").trim() || null,
-        });
+      const { data: createdCompany, error: insertError } =
+        await getBrowserSupabase()
+          .from("companies")
+          .insert({
+            name: String(formData.get("name") ?? "").trim(),
+            gstin: String(formData.get("gstin") ?? "").trim() || null,
+            email: String(formData.get("email") ?? "").trim() || null,
+            phone: String(formData.get("phone") ?? "").trim() || null,
+          })
+          .select("id, name, gstin, email, phone, created_at")
+          .single();
       if (insertError) throw new Error(insertError.message);
+      if (!createdCompany) {
+        throw new Error("Company was created, but its ID was not returned.");
+      }
+      setCompanies((current) =>
+        [
+          ...current.filter((company) => company.id !== createdCompany.id),
+          createdCompany,
+        ]
+          .sort((left, right) => left.name.localeCompare(right.name)),
+      );
       form.reset();
       await completeAction("Company created successfully.");
     } catch (actionError) {

@@ -93,6 +93,8 @@ an independent security audit or compliance certification. See
 
 The login screen asks the user to select Admin, Employee, or Client. The selected tab is checked against the signed-in user's `profiles.role`; successful sessions are routed to `/admin`, `/employee`, or `/dashboard`. Database RLS policies remain authoritative even when a route is hidden or guarded in the UI.
 
+Authenticated sessions display an inactivity warning after 25 minutes and sign out locally after 30 minutes without activity. Mouse movement, keyboard input, scrolling, touch, or a click resets the idle timer. This is a client-side session convenience and does not replace server-side authorization or the Supabase session's own expiry.
+
 ## Technology
 
 | Category | Implementation |

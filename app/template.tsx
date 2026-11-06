@@ -9,6 +9,7 @@ export default function Template({ children }: { children: ReactNode }) {
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
+      className="transform-gpu"
     >
       {children}
     </motion.div>
