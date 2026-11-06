@@ -1,13 +1,23 @@
-# Tally Client Reporting Portal
+<div align="center">
+  <img src="./public/logo.png" alt="FINORA Accounting & Business Solutions" width="160">
+  <h1>FINORA | Tally Client Reporting Portal</h1>
+  <p>A role-based reporting workspace connecting desktop TallyPrime data to Supabase and Next.js.</p>
 
-**A secure cloud bridge from desktop TallyPrime to role-based financial reporting.**
+  <a href="https://github.com/arjunpv1312/tally-client-portal/actions/workflows/ci.yml">
+    <img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/arjunpv1312/tally-client-portal/ci.yml?branch=main&style=for-the-badge&logo=github&label=CI">
+  </a>
+  <a href="./LICENSE">
+    <img alt="Apache License 2.0" src="https://img.shields.io/badge/License-Apache_2.0-E5C365?style=for-the-badge&logo=opensourceinitiative&logoColor=0B0E17">
+  </a>
+  <img alt="TypeScript 5" src="https://img.shields.io/badge/TypeScript-5.x-0B0E17?style=for-the-badge&logo=typescript&logoColor=E5C365">
+  <img alt="Next.js 16 App Router" src="https://img.shields.io/badge/Next.js-16_App_Router-0B0E17?style=for-the-badge&logo=nextdotjs&logoColor=E5C365">
+  <img alt="Supabase PostgreSQL and RLS" src="https://img.shields.io/badge/Supabase-PostgreSQL_%2B_RLS-0B0E17?style=for-the-badge&logo=supabase&logoColor=3ECF8E">
+  <img alt="Python Tally sync worker" src="https://img.shields.io/badge/Python-Tally_Sync_Worker-0B0E17?style=for-the-badge&logo=python&logoColor=3776AB">
+</div>
 
-[![Next.js](https://img.shields.io/badge/Next.js-16.3-black?logo=next.js)](https://nextjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.x-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Supabase](https://img.shields.io/badge/Supabase-Postgres_%2B_Auth-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com/)
-[![Framer Motion](https://img.shields.io/badge/Framer_Motion-12.x-BB4BFF?logo=framer&logoColor=white)](https://www.framer.com/motion/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+> **Demo:** No hosted demo is currently configured. Use the local setup below with a development Supabase project and synthetic data.
+
+**Quick links:** [Architecture](#system-architecture) · [Security](#architecture-and-security-matrix) · [Quickstart](#quickstart) · [TallyPrime sync](#tallyprime-connection-protocol) · [Contributing](./CONTRIBUTING.md) · [Compliance notes](./COMPLIANCE.md)
 
 ## Executive overview
 
@@ -19,34 +29,55 @@ The web application includes administrator-managed company and account directori
 
 ## System architecture
 
-```text
-  ACCOUNTING DATA PATH
-  +-------------------------+     XML / HTTP :9000     +---------------------------+
-  | Desktop TallyPrime      | -----------------------> | Trusted local sync worker  |
-  | Company books + ledgers |                            | tally_sync.py              |
-  +-------------------------+                          +-------------+-------------+
-                                                                    |
-                                                   HTTPS / Supabase | API
-                                                                    v
-  +-------------------------+      Auth + RLS        +---------------------------+
-  | Admin / Employee /      | <--------------------> | Supabase                  |
-  | Client in a web browser |                         | Auth + PostgreSQL         |
-  +------------+------------+                         +-------------+-------------+
-               |                                                      ^
-               | HTTPS                                                |
-               v                                                      |
-  +-------------------------+     Supabase JS client / scoped RLS ----+
-  | Next.js App Router       |
-  | Admin / Employee /       |
-  | Client financial views   |
-  +-------------------------+
+```mermaid
+sequenceDiagram
+    actor Tally as TallyPrime Desktop
+    participant Worker as Python Sync Worker
+    participant DB as Supabase PostgreSQL
+    participant App as Next.js App Router
 
-  ADMIN ACCOUNT PROVISIONING
-  Next.js admin UI --> protected API route --> Supabase Auth Admin
-                       (verified admin)        (server-only key)
+    Tally->>Worker: Day Book XML over local HTTP
+    Worker->>DB: HTTPS REST batch upserts (250 rows)
+    Note over Worker,DB: Worker uses a server-side service-role key
+    App->>DB: Authenticated reads scoped by RLS
+    DB-->>App: Vouchers and financial summaries
+    DB-->>App: Postgres Changes notifications
+    App->>DB: Refresh data after a change
 ```
 
-The Tally listener should remain on a trusted local network and must not be exposed directly to the public internet. The Supabase service-role key is for server-side account provisioning only: never use it in browser code or expose it through a `NEXT_PUBLIC_` variable.
+The Tally listener should remain on a trusted local network and must not be
+exposed directly to the public internet. The sync worker uses a service-role
+key for writes; this key bypasses RLS and must be kept on the trusted sync
+machine. Admin API routes also use the key server-side after verifying the
+requesting administrator. Never place it in browser code or a `NEXT_PUBLIC_`
+variable.
+
+## Architecture and security matrix
+
+| Tier | Implementation | Evidence and limits |
+| --- | --- | --- |
+| Authentication and roles | Supabase Auth, profiles, and role-checked Next.js routes | `proxy.ts` enforces route roles; privileged admin APIs independently verify the access token and admin profile. Route checks do not replace database authorization. |
+| Tenant data access | PostgreSQL Row Level Security | [`supabase/schema.sql`](./supabase/schema.sql) enables RLS and defines user/company/employee and admin policies for the current tables. Test policies against the deployed schema and every role. |
+| Tally data ingestion | Python standard-library worker using TallyPrime XML/HTTP and Supabase REST | Upserts batches of 250 records. Unique constraints cover `(company_id, tally_voucher_id)` and `(company_id, period_start)`; this provides idempotent keys for those records. |
+| Database | PostgreSQL tables, foreign keys, constraints, and indexes | Current schema defines profiles, companies, assignments, vouchers, and summaries. It does not currently define an audit-log table, automatic summary triggers, or `v_company_voucher_totals` view. |
+| Frontend | Next.js 16 App Router, React 19, TypeScript, Tailwind CSS, Framer Motion, Recharts | Dashboard subscribes to Supabase Postgres Changes and refreshes data using the authenticated client. This is not a claim that all charts are code-split or that the UI has been independently audited. |
+| Privacy and cryptography | Deployment-dependent | Hosting, TLS versions, encryption at rest, backup retention, and region depend on the configured providers. See [COMPLIANCE.md](./COMPLIANCE.md); this repository does not certify DPDP/GDPR compliance or a particular cipher suite. |
+
+### Key capabilities
+
+- Role-aware admin, employee, and client-company workspaces; no public
+  self-registration.
+- Company-scoped access policies for financial summaries and vouchers.
+- Dashboard visualizations for sales, purchases, expenses, net profit, and GST
+  values, including CGST/SGST/IGST values where Tally data is available.
+- Supabase Postgres Changes subscriptions to refresh client dashboards after
+  voucher or summary changes.
+- Idempotent sync upserts using database uniqueness constraints.
+
+The repository does not currently implement a dedicated audit-log system.
+RLS, CI checks, and governance documents are controls and process evidence, not
+an independent security audit or compliance certification. See
+[`SECURITY.md`](./SECURITY.md) for disclosure guidance and known boundaries.
 
 ## Roles and authorization
 
@@ -205,4 +236,4 @@ tally-client-portal/
 
 ## License
 
-Distributed under the MIT License. See [`LICENSE`](./LICENSE).
+Distributed under the Apache License 2.0. See [`LICENSE`](./LICENSE).
