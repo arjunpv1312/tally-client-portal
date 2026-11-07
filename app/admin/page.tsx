@@ -4,12 +4,15 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Building2,
   Check,
+  CheckCircle2,
   ClipboardList,
   Copy,
   Clock3,
   Eye,
   Loader2,
+  Monitor,
   Plus,
+  RefreshCw,
   Trash2,
   UserPlus,
   UserRoundX,
@@ -113,17 +116,6 @@ function roleLabel(role: UserRole) {
 }
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
-const supabaseProjectRef = (() => {
-  if (!supabaseUrl) return "";
-  try {
-    const hostname = new URL(supabaseUrl).hostname;
-    return hostname.endsWith(".supabase.co")
-      ? hostname.slice(0, -".supabase.co".length)
-      : "";
-  } catch {
-    return "";
-  }
-})();
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<Tab>("companies");
@@ -606,64 +598,72 @@ export default function AdminPage() {
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h2 className="text-lg font-semibold">
-                  Tally Integration &amp; Project Config
+                  Tally Integration
                 </h2>
                 <p className="mt-1 text-sm text-slate-300">
-                  Use these public project settings when configuring your local
-                  sync worker. Never share a service-role key in the browser.
+                  Connect your company&apos;s TallyPrime data in three simple
+                  steps.
                 </p>
-                <dl className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                      Supabase Project ID / Reference
-                    </dt>
-                    <dd className="mt-1 break-all font-mono text-sm">
-                      {supabaseProjectRef || "Not available"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                      API Endpoint
-                    </dt>
-                    <dd className="mt-1 break-all font-mono text-sm">
-                      {supabaseUrl || "Not configured"}
-                    </dd>
-                  </div>
-                </dl>
+                <span
+                  className={`mt-4 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium ${
+                    supabaseUrl
+                      ? "bg-emerald-400/15 text-emerald-300"
+                      : "bg-slate-400/15 text-slate-300"
+                  }`}
+                  role="status"
+                >
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  {supabaseUrl
+                    ? "Supabase Cloud (Connected)"
+                    : "Supabase Cloud (Not configured)"}
+                </span>
               </div>
               <button
                 type="button"
                 disabled={!supabaseUrl}
                 onClick={() =>
                   void copyToClipboard(
-                    `SUPABASE_PROJECT_REF=${supabaseProjectRef}\nSUPABASE_URL=${supabaseUrl}\nTALLY_HOST=http://localhost:9000`,
-                    "Copied project config!",
+                    supabaseUrl,
+                    "Integration endpoint copied.",
                   )
                 }
                 className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Copy className="h-4 w-4" />
-                Copy Project Config
+                Copy Integration Endpoint
               </button>
             </div>
             <div className="mt-5 grid gap-3 border-t border-white/10 pt-5 sm:grid-cols-3">
               {[
-                "Copy your Company ID from the Companies list below.",
-                "Open TallyPrime with its XML server available on port 9000.",
-                "Run python tally_sync.py or double-click run_sync.bat.",
+                {
+                  text: "Click Copy ID next to your company below.",
+                  icon: Copy,
+                },
+                {
+                  text: "Open the TallyPrime desktop application.",
+                  icon: Monitor,
+                },
+                {
+                  text: "Double-click run_sync.bat to sync vouchers.",
+                  icon: RefreshCw,
+                },
               ].map((step, index) => (
-                <div key={step} className="flex gap-3 text-sm text-slate-200">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-finora-gold font-semibold text-slate-950">
-                    {index + 1}
+                <div
+                  key={step.text}
+                  className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-finora-gold/15 text-finora-gold">
+                    <step.icon className="h-4 w-4" aria-hidden="true" />
                   </span>
-                  <p>{step}</p>
+                  <p>
+                    <span className="mr-1 font-semibold text-finora-gold">
+                      {index + 1}.
+                    </span>
+                    {step.text}
+                  </p>
                 </div>
               ))}
             </div>
-            <p className="mt-4 text-xs text-slate-400">
-              The sync service-role key must be configured securely on the
-              computer running the sync. It is never displayed or copied here.
-            </p>
           </section>
 
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6 lg:grid-cols-4">

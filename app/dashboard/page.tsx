@@ -11,8 +11,12 @@ import {
 import {
   GstSummaryBarChart,
   NetProfitAreaChart,
-  SalesExpensesBarChart,
 } from "@/components/FinancialCharts";
+import {
+  aggregateVoucherMonths,
+  FinancialVisualizations,
+  type MonthlyFinancialData,
+} from "@/components/dashboard/Visualizations";
 import { EmptyStateGraphic } from "@/components/ui/EmptyStateGraphic";
 import {
   DateFilter,
@@ -21,7 +25,6 @@ import {
 } from "@/components/dashboard/DateFilter";
 import { ExportButtons } from "@/components/ui/ExportButtons";
 import { getBrowserSupabase, getSupabase } from "@/lib/supabase";
-import type { VoucherSummary } from "@/types";
 
 type SummaryRow = {
   id?: string;
@@ -54,6 +57,9 @@ type VoucherRow = {
   narration: string | null;
   total_amount: number | string | null;
   amount: number | string | null;
+  sales_amount?: number | string | null;
+  purchase_amount?: number | string | null;
+  expense_amount?: number | string | null;
   voucher_date?: string | null;
 };
 
@@ -136,6 +142,9 @@ async function fetchDashboardData(
           id: string;
           total_amount?: number | string | null;
           amount?: number | string | null;
+          sales_amount?: number | string | null;
+          purchase_amount?: number | string | null;
+          expense_amount?: number | string | null;
           party_name?: string | null;
           voucher_type?: string | null;
           date?: string | null;
@@ -148,7 +157,7 @@ async function fetchDashboardData(
   const voucherVariants = [
     {
       columns:
-        "id, total_amount, amount, party_name, voucher_type, date, voucher_date, voucher_number, narration",
+        "id, total_amount, amount, sales_amount, purchase_amount, expense_amount, party_name, voucher_type, date, voucher_date, voucher_number, narration",
       orderColumn: "date",
       dateColumn: "voucher_date",
     },
@@ -195,6 +204,9 @@ async function fetchDashboardData(
           narration: voucher.narration ?? null,
           total_amount: voucher.total_amount ?? null,
           amount: voucher.amount ?? null,
+          sales_amount: voucher.sales_amount ?? null,
+          purchase_amount: voucher.purchase_amount ?? null,
+          expense_amount: voucher.expense_amount ?? null,
         }));
         voucherWarning = null;
         break;
@@ -355,19 +367,41 @@ export default function DashboardPage() {
     }
   }, [dateRange.endDate, dateRange.startDate]);
 
-  const chartData = useMemo<VoucherSummary[]>(
-    () =>
-      (dashboard?.summaries ?? []).map((summary) => ({
+  const chartData = useMemo(
+    () => {
+      const summaries = dashboard?.summaries ?? [];
+      const summaryRows = summaries.map((summary) => ({
+        month: summary.period_start.slice(0, 7),
         period: formatPeriod(summary.period_start),
         sales: numericValue(summary.total_sales),
+        purchases: numericValue(summary.total_purchases),
+        totalExpenses: numericValue(summary.total_expenses),
         expenses:
           numericValue(summary.total_purchases) +
           numericValue(summary.total_expenses),
         net_profit: numericValue(summary.net_profit),
         gst_payable: numericValue(summary.gst_payable),
         gst_input: numericValue(summary.gst_input),
-      })),
-    [dashboard?.summaries],
+      }));
+      const existingMonths = new Set(summaryRows.map((row) => row.month));
+      const voucherRows = aggregateVoucherMonths(dashboard?.vouchers ?? [])
+        .filter((month) => !existingMonths.has(month.period))
+        .map((month) => ({
+          month: month.period,
+          period: formatPeriod(month.period),
+          sales: month.sales,
+          purchases: month.purchases,
+          totalExpenses: month.expenses,
+          expenses: month.purchases + month.expenses,
+          net_profit: month.sales - month.purchases - month.expenses,
+          gst_payable: 0,
+          gst_input: 0,
+        }));
+      return [...summaryRows, ...voucherRows].sort((left, right) =>
+        left.month.localeCompare(right.month),
+      );
+    },
+    [dashboard?.summaries, dashboard?.vouchers],
   );
   const latest = chartData.at(-1);
   const latestSummary = dashboard?.summaries.at(-1);
@@ -375,7 +409,6 @@ export default function DashboardPage() {
     latestSummary?.last_synced_at ?? latestSummary?.updated_at ?? null;
   const metricCards = useMemo(() => {
     const latestChartData = chartData.at(-1);
-    const summary = dashboard?.summaries.at(-1);
     if (!latestChartData) return [];
     return [
       {
@@ -384,18 +417,28 @@ export default function DashboardPage() {
       },
       {
         label: `Purchases · ${latestChartData.period}`,
-        value: numericValue(summary?.total_purchases ?? 0),
+        value: latestChartData.purchases,
       },
       {
         label: `Expenses · ${latestChartData.period}`,
-        value: numericValue(summary?.total_expenses ?? 0),
+        value: latestChartData.totalExpenses,
       },
       {
         label: `Net profit · ${latestChartData.period}`,
         value: latestChartData.net_profit,
       },
     ];
-  }, [chartData, dashboard?.summaries]);
+  }, [chartData]);
+  const monthlyFinancialData = useMemo<MonthlyFinancialData[]>(
+    () =>
+      chartData.map((row) => ({
+        period: row.period,
+        sales: row.sales,
+        purchases: row.purchases,
+        expenses: row.totalExpenses,
+      })),
+    [chartData],
+  );
   const voucherExportRows = useMemo(
     () =>
       (dashboard?.vouchers ?? []).map((voucher) => ({
@@ -594,28 +637,29 @@ export default function DashboardPage() {
                 </p>
               ) : null}
 
-              {chartData.length > 0 ? (
+              {chartData.length > 0 || dashboard?.vouchers.length ? (
                 <>
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg sm:p-6">
-                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
-                      Sales vs Purchases & Expenses
-                    </h2>
-                    <SalesExpensesBarChart data={chartData} />
-                  </section>
+                  <FinancialVisualizations
+                    vouchers={dashboard?.vouchers ?? []}
+                    monthlyData={monthlyFinancialData}
+                  />
+                  {chartData.length ? (
+                    <>
+                      <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg sm:p-6">
+                        <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
+                          Net Profit Trend
+                        </h2>
+                        <NetProfitAreaChart data={chartData} />
+                      </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg sm:p-6">
-                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
-                      Net Profit Trend
-                    </h2>
-                    <NetProfitAreaChart data={chartData} />
-                  </section>
-
-                  <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg sm:p-6">
-                    <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
-                      GST Summary
-                    </h2>
-                    <GstSummaryBarChart data={chartData} />
-                  </section>
+                      <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm transition-all duration-300 hover:border-finora-gold/50 hover:shadow-gold-glow dark:border-finora-gold/20 dark:bg-finora-surface/70 dark:backdrop-blur-lg sm:p-6">
+                        <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
+                          GST Summary
+                        </h2>
+                        <GstSummaryBarChart data={chartData} />
+                      </section>
+                    </>
+                  ) : null}
                 </>
               ) : null}
 

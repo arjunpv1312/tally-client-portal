@@ -2,16 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, X } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { getBrowserSupabase } from "@/lib/supabase";
+import {
+  aggregateVoucherMonths,
+  FinancialVisualizations,
+} from "@/components/dashboard/Visualizations";
 
 type Summary = {
   period_start: string;
@@ -30,6 +25,9 @@ type Voucher = {
   party_name: string | null;
   total_amount: number | string | null;
   amount: number | string | null;
+  sales_amount: number | string | null;
+  purchase_amount: number | string | null;
+  expense_amount: number | string | null;
 };
 
 type CompanyDashboardPreviewProps = {
@@ -83,10 +81,10 @@ export function CompanyDashboardPreview({
           .returns<Summary[]>(),
         supabase
           .from("vouchers")
-          .select("id, date, voucher_date, voucher_number, voucher_type, party_name, total_amount, amount")
+          .select("id, date, voucher_date, voucher_number, voucher_type, party_name, total_amount, amount, sales_amount, purchase_amount, expense_amount")
           .eq("company_id", company.id)
           .order("voucher_date", { ascending: false })
-          .limit(10)
+          .limit(1000)
           .returns<Voucher[]>(),
       ]);
       if (cancelled) return;
@@ -143,28 +141,42 @@ export function CompanyDashboardPreview({
     };
   }, [company.id]);
 
+  const monthlyData = useMemo(
+    () => {
+      const summaryMonths = new Set(
+        summaries.map((summary) => summary.period_start.slice(0, 7)),
+      );
+      const summaryData = summaries.map((summary) => ({
+        period: summary.period_start.slice(0, 7),
+        sales: amount(summary.total_sales),
+        purchases: amount(summary.total_purchases),
+        expenses: amount(summary.total_expenses),
+        netProfit: amount(summary.net_profit),
+      }));
+      const voucherFallback = aggregateVoucherMonths(vouchers)
+        .filter((month) => !summaryMonths.has(month.period))
+        .map((month) => ({
+          ...month,
+          netProfit: month.sales - month.purchases - month.expenses,
+        }));
+      return [...summaryData, ...voucherFallback].sort((left, right) =>
+        left.period.localeCompare(right.period),
+      );
+    },
+    [summaries, vouchers],
+  );
   const totals = useMemo(
     () =>
-      summaries.reduce(
-        (result, summary) => ({
-          sales: result.sales + amount(summary.total_sales),
-          purchases: result.purchases + amount(summary.total_purchases),
-          expenses: result.expenses + amount(summary.total_expenses),
-          netProfit: result.netProfit + amount(summary.net_profit),
+      monthlyData.reduce(
+        (result, month) => ({
+          sales: result.sales + month.sales,
+          purchases: result.purchases + month.purchases,
+          expenses: result.expenses + month.expenses,
+          netProfit: result.netProfit + (month.netProfit ?? 0),
         }),
         { sales: 0, purchases: 0, expenses: 0, netProfit: 0 },
       ),
-    [summaries],
-  );
-  const chartData = useMemo(
-    () =>
-      summaries.map((summary) => ({
-        period: summary.period_start.slice(0, 7),
-        Sales: amount(summary.total_sales),
-        Purchases: amount(summary.total_purchases),
-        Expenses: amount(summary.total_expenses),
-      })),
-    [summaries],
+    [monthlyData],
   );
 
   return (
@@ -227,33 +239,14 @@ export function CompanyDashboardPreview({
               ))}
             </div>
 
-            {chartData.length ? (
-              <section className="rounded-xl border border-white/10 bg-white/5 p-4">
-                <h3 className="mb-3 font-semibold">Monthly financial trends</h3>
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData}>
-                      <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
-                      <XAxis dataKey="period" stroke="#94a3b8" />
-                      <YAxis stroke="#94a3b8" />
-                      <Tooltip
-                        formatter={(value) => currency(Number(value))}
-                        contentStyle={{
-                          background: "#0f172a",
-                          border: "1px solid #475569",
-                          borderRadius: "0.75rem",
-                        }}
-                      />
-                      <Bar dataKey="Sales" fill="#E5C365" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="Purchases" fill="#60A5FA" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="Expenses" fill="#F87171" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </section>
+            {monthlyData.length || vouchers.length ? (
+              <FinancialVisualizations
+                vouchers={vouchers}
+                monthlyData={monthlyData}
+              />
             ) : (
               <p className="rounded-xl border border-white/10 bg-white/5 p-5 text-sm text-slate-400">
-                No financial summaries have been synced for this company yet.
+                No financial summaries or vouchers have been synced for this company yet.
               </p>
             )}
 
@@ -273,7 +266,7 @@ export function CompanyDashboardPreview({
                     </tr>
                   </thead>
                   <tbody>
-                    {vouchers.map((voucher) => (
+                    {vouchers.slice(0, 10).map((voucher) => (
                       <tr key={voucher.id} className="border-t border-white/10">
                         <td className="px-4 py-3">{voucher.date ?? voucher.voucher_date ?? "—"}</td>
                         <td className="px-4 py-3">{voucher.voucher_number ?? "—"}</td>
