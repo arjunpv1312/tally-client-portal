@@ -54,6 +54,7 @@ export async function saveEmployeeTasks(
     .eq("id", workLogId)
     .is("logout_time", null)
     .select("id")
+    .returns<{ id: string }[]>()
     .maybeSingle();
 
   if (error) throw new Error(error.message);

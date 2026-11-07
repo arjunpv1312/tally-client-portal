@@ -101,6 +101,7 @@ async function fetchDashboardData(
     .from("profiles")
     .select("company_id, full_name")
     .eq("id", userData.user.id)
+    .returns<{ company_id: string | null; full_name: string | null }[]>()
     .maybeSingle();
   if (profileError) throw new Error(profileError.message);
   if (!profile?.company_id) {
@@ -114,6 +115,7 @@ async function fetchDashboardData(
       .from("companies")
       .select("name")
       .eq("id", profile.company_id)
+      .returns<{ name: string }[]>()
       .maybeSingle(),
   ]);
   const voucherQuery = (
@@ -328,6 +330,12 @@ export default function DashboardPage() {
   const [reloadVersion, setReloadVersion] = useState(0);
   const [realtimeError, setRealtimeError] = useState("");
 
+  const handleDateRangeChange = useCallback((range: DateRange) => {
+    setLoading(true);
+    setError("");
+    setDateRange(range);
+  }, []);
+
   const refreshFromRealtime = useCallback(async () => {
     try {
       const data = await fetchDashboardData(
@@ -365,6 +373,42 @@ export default function DashboardPage() {
   const latestSummary = dashboard?.summaries.at(-1);
   const lastSyncedAt =
     latestSummary?.last_synced_at ?? latestSummary?.updated_at ?? null;
+  const metricCards = useMemo(() => {
+    const latestChartData = chartData.at(-1);
+    const summary = dashboard?.summaries.at(-1);
+    if (!latestChartData) return [];
+    return [
+      {
+        label: `Sales · ${latestChartData.period}`,
+        value: latestChartData.sales,
+      },
+      {
+        label: `Purchases · ${latestChartData.period}`,
+        value: numericValue(summary?.total_purchases ?? 0),
+      },
+      {
+        label: `Expenses · ${latestChartData.period}`,
+        value: numericValue(summary?.total_expenses ?? 0),
+      },
+      {
+        label: `Net profit · ${latestChartData.period}`,
+        value: latestChartData.net_profit,
+      },
+    ];
+  }, [chartData, dashboard?.summaries]);
+  const voucherExportRows = useMemo(
+    () =>
+      (dashboard?.vouchers ?? []).map((voucher) => ({
+        Date: voucher.date ?? voucher.voucher_date ?? "",
+        Voucher: voucher.voucher_number ?? "",
+        Type: voucher.voucher_type,
+        Party: voucher.party_name ?? voucher.narration ?? "",
+        Amount: numericValue(
+          voucher.total_amount ?? voucher.amount ?? 0,
+        ),
+      })),
+    [dashboard?.vouchers],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -463,13 +507,7 @@ export default function DashboardPage() {
           transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           className="mx-auto max-w-6xl space-y-8 px-4 py-6 transform-gpu will-change-transform sm:px-6 lg:px-8"
         >
-          <DateFilter
-            onChange={(range) => {
-              setLoading(true);
-              setError("");
-              setDateRange(range);
-            }}
-          />
+          <DateFilter onChange={handleDateRangeChange} />
           {loading ? (
             <DashboardContentSkeleton />
           ) : error ? (
@@ -498,34 +536,12 @@ export default function DashboardPage() {
                 <ExportButtons
                   reportTitle="Recent vouchers"
                   filename="finora-vouchers"
-                  rows={(dashboard?.vouchers ?? []).map((voucher) => ({
-                    Date: voucher.date ?? voucher.voucher_date ?? "",
-                    Voucher: voucher.voucher_number ?? "",
-                    Type: voucher.voucher_type,
-                    Party: voucher.party_name ?? voucher.narration ?? "",
-                    Amount: numericValue(
-                      voucher.total_amount ?? voucher.amount ?? 0,
-                    ),
-                  }))}
+                  rows={voucherExportRows}
                 />
               </div>
               {latest ? (
                 <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 lg:grid-cols-4">
-                  {[
-                    { label: `Sales · ${latest.period}`, value: latest.sales },
-                    {
-                      label: `Purchases · ${latest.period}`,
-                      value: numericValue(latestSummary?.total_purchases ?? 0),
-                    },
-                    {
-                      label: `Expenses · ${latest.period}`,
-                      value: numericValue(latestSummary?.total_expenses ?? 0),
-                    },
-                    {
-                      label: `Net profit · ${latest.period}`,
-                      value: latest.net_profit,
-                    },
-                  ].map((stat, index) => (
+                  {metricCards.map((stat, index) => (
                     <motion.section
                       key={stat.label}
                       initial={{ opacity: 0, y: 8 }}

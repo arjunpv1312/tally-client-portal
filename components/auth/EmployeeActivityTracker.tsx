@@ -54,6 +54,7 @@ export function EmployeeActivityTracker() {
           .from("profiles")
           .select("role")
           .eq("id", userId)
+          .returns<{ role: string }[]>()
           .maybeSingle();
         if (profileError) throw new Error(profileError.message);
         if (profile?.role !== "employee") return;
@@ -74,6 +75,12 @@ export function EmployeeActivityTracker() {
             .select("id, company_id, login_time, logout_time")
             .eq("id", existingLogId)
             .eq("user_id", userId)
+            .returns<{
+              id: string;
+              company_id: string;
+              login_time: string;
+              logout_time: string | null;
+            }[]>()
             .maybeSingle();
           if (error) throw new Error(error.message);
           if (existingLog && !existingLog.logout_time) {
@@ -91,6 +98,7 @@ export function EmployeeActivityTracker() {
           .from("employee_work_logs")
           .insert({ user_id: userId, company_id: companyId })
           .select("id, login_time")
+          .returns<{ id: string; login_time: string }[]>()
           .single();
         if (insertError) throw new Error(insertError.message);
         if (!createdLog) throw new Error("The employee work log was not returned.");

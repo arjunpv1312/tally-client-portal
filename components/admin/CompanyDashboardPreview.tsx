@@ -156,12 +156,16 @@ export function CompanyDashboardPreview({
       ),
     [summaries],
   );
-  const chartData = summaries.map((summary) => ({
-    period: summary.period_start.slice(0, 7),
-    Sales: amount(summary.total_sales),
-    Purchases: amount(summary.total_purchases),
-    Expenses: amount(summary.total_expenses),
-  }));
+  const chartData = useMemo(
+    () =>
+      summaries.map((summary) => ({
+        period: summary.period_start.slice(0, 7),
+        Sales: amount(summary.total_sales),
+        Purchases: amount(summary.total_purchases),
+        Expenses: amount(summary.total_expenses),
+      })),
+    [summaries],
+  );
 
   return (
     <div

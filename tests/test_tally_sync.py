@@ -13,10 +13,12 @@ from tally_sync import (
     SyncError,
     _load_env_file,
     _http_request,
+    _company_id_from_environment,
     _voucher_row,
     _validate_supabase_url,
     _validate_tally_url,
     build_daybook_request,
+    main,
     parse_daybook_xml,
     summarize_vouchers,
 )
@@ -167,6 +169,44 @@ class TallySyncTests(unittest.TestCase):
                     os.environ["SUPABASE_URL"], "https://existing.supabase.co"
                 )
                 self.assertEqual(os.environ["TALLY_COMPANY_NAME"], "Acme Traders")
+
+    def test_company_id_supports_legacy_target_name(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"TARGET_COMPANY_ID": "target-id"},
+            clear=True,
+        ):
+            self.assertEqual(_company_id_from_environment(), "target-id")
+
+    def test_company_id_prefers_current_name_when_both_are_set(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "TALLY_COMPANY_ID": "tally-id",
+                "TARGET_COMPANY_ID": "target-id",
+            },
+            clear=True,
+        ):
+            self.assertEqual(_company_id_from_environment(), "tally-id")
+
+    def test_company_id_requires_either_supported_environment_variable(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(SyncError, "TALLY_COMPANY_ID"):
+                _company_id_from_environment()
+
+    def test_main_reports_success_through_structured_logging(self) -> None:
+        with patch("tally_sync.run_sync", return_value=(2, 1)):
+            with self.assertLogs("tally_sync", level="INFO") as logs:
+                self.assertEqual(main(), 0)
+        self.assertEqual(logs.records[-1].levelname, "SUCCESS")
+        self.assertIn("Tally sync complete", logs.records[-1].getMessage())
+
+    def test_main_reports_sync_errors_through_structured_logging(self) -> None:
+        with patch("tally_sync.run_sync", side_effect=SyncError("missing config")):
+            with self.assertLogs("tally_sync", level="ERROR") as logs:
+                self.assertEqual(main(), 1)
+        self.assertEqual(logs.records[-1].levelname, "ERROR")
+        self.assertIn("Tally sync failed: missing config", logs.records[-1].getMessage())
 
 
 if __name__ == "__main__":

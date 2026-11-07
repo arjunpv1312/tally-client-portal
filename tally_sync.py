@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
-import sys
 import time
 import urllib.error
 import urllib.parse
@@ -31,6 +31,9 @@ TAX_LEDGER_TOKENS = {
     "sgst": ("sgst",),
     "igst": ("igst",),
 }
+SUCCESS_LEVEL = logging.INFO + 5
+logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
+logger = logging.getLogger(__name__)
 
 
 class SyncError(Exception):
@@ -472,6 +475,19 @@ def _required_environment(name: str) -> str:
     return value
 
 
+def _company_id_from_environment() -> str:
+    company_id = (
+        os.environ.get("TALLY_COMPANY_ID", "").strip()
+        or os.environ.get("TARGET_COMPANY_ID", "").strip()
+    )
+    if not company_id:
+        raise SyncError(
+            "Required environment variable TALLY_COMPANY_ID "
+            "(or TARGET_COMPANY_ID) is missing."
+        )
+    return company_id
+
+
 def _validate_supabase_url(value: str) -> str:
     parsed = urllib.parse.urlsplit(value)
     if parsed.scheme == "https" and parsed.hostname and not parsed.username:
@@ -542,11 +558,13 @@ def run_sync() -> tuple[int, int]:
         os.environ.get("TALLY_HOST", TALLY_URL).strip()
     )
     service_key = _required_environment("SUPABASE_SERVICE_ROLE_KEY")
-    company_id = _required_environment("TALLY_COMPANY_ID")
+    company_id = _company_id_from_environment()
     try:
         company_id = str(uuid.UUID(company_id))
     except ValueError as error:
-        raise SyncError("TALLY_COMPANY_ID must be a valid company UUID.") from error
+        raise SyncError(
+            "TALLY_COMPANY_ID or TARGET_COMPANY_ID must be a valid company UUID."
+        ) from error
     company_name = _required_environment("TALLY_COMPANY_NAME")
 
     today = date.today()
@@ -569,11 +587,17 @@ def run_sync() -> tuple[int, int]:
         for name in os.environ.get("TALLY_EXPENSE_LEDGER_NAMES", "").split(",")
         if name.strip()
     }
+    logger.info("Connecting to Tally XML Server at %s...", tally_url)
     tally_xml = fetch_tally_daybook(
         company_name, from_date, to_date, retries, timeout, tally_url
     )
     vouchers = parse_daybook_xml(tally_xml, expenses)
     summaries = summarize_vouchers(vouchers)
+    logger.info(
+        "Extracted %d vouchers and %d monthly summaries.",
+        len(vouchers),
+        len(summaries),
+    )
     synced_at = datetime.now().astimezone().isoformat()
 
     voucher_rows = [_voucher_row(company_id, voucher) for voucher in vouchers]
@@ -603,13 +627,18 @@ def run_sync() -> tuple[int, int]:
 
 def main() -> int:
     try:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="[%(levelname)s] %(message)s",
+        )
         voucher_count, summary_count = run_sync()
     except SyncError as error:
-        print(f"Tally sync failed: {error}", file=sys.stderr)
+        logger.error("Tally sync failed: %s", error)
         return 1
-    print(
+    logger.log(
+        SUCCESS_LEVEL,
         f"Tally sync complete: {voucher_count} vouchers and "
-        f"{summary_count} monthly summaries upserted."
+        f"{summary_count} monthly summaries upserted.",
     )
     return 0
 

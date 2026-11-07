@@ -138,6 +138,10 @@ export default function AdminPage() {
   const [newUserRole, setNewUserRole] = useState<UserRole>("employee");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const closeCompanyPreview = useCallback(
+    () => setPreviewCompany(null),
+    [],
+  );
   const [directoryErrors, setDirectoryErrors] = useState<DirectoryErrors>({});
   const [assignmentWarning, setAssignmentWarning] = useState("");
 
@@ -164,10 +168,12 @@ export default function AdminPage() {
       supabase
         .from("companies")
         .select("id, name, gstin, email, phone, created_at")
+        .returns<Company[]>()
         .order("name"),
       supabase
         .from("profiles")
         .select("id, email, full_name, role, company_id, created_at")
+        .returns<Profile[]>()
         .order("created_at", { ascending: false }),
     ]);
 
@@ -230,9 +236,9 @@ export default function AdminPage() {
         : {}),
     });
     if (!companyResult.error) {
-      setCompanies((companyResult.data ?? []) as Company[]);
+      setCompanies(companyResult.data ?? []);
     }
-    setProfiles((profileResult.data ?? []) as Profile[]);
+    setProfiles(profileResult.data ?? []);
     setAssignments(
       (assignmentResult.data ?? []).map((assignment) => {
         const row = assignment as {
@@ -306,6 +312,7 @@ export default function AdminPage() {
             phone: String(formData.get("phone") ?? "").trim() || null,
           })
           .select("id, name, gstin, email, phone, created_at")
+          .returns<Company[]>()
           .single();
       if (insertError) throw new Error(insertError.message);
       if (!createdCompany) {
@@ -1500,7 +1507,7 @@ export default function AdminPage() {
       {previewCompany ? (
         <CompanyDashboardPreview
           company={previewCompany}
-          onClose={() => setPreviewCompany(null)}
+          onClose={closeCompanyPreview}
         />
       ) : null}
     </AuthGuard>

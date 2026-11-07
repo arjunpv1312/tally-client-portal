@@ -194,7 +194,7 @@ TALLY_COMPANY_NAME=<exact-company-name-open-in-TallyPrime>
 TALLY_EXPENSE_LEDGER_NAMES=Office Rent,Professional Fees
 ```
 
-The sync worker reads `.env` without requiring an additional Python package; already-set process environment variables take precedence. `TALLY_HOST` defaults to `http://localhost:9000`. Use `TALLY_COMPANY_ID` for the company UUID; `TARGET_COMPANY_ID` is not read. The worker also requires the exact open Tally company name in `TALLY_COMPANY_NAME`.
+The sync worker reads `.env` without requiring an additional Python package; already-set process environment variables take precedence. `TALLY_HOST` defaults to `http://localhost:9000`. Use `TALLY_COMPANY_ID` for the company UUID; the legacy `TARGET_COMPANY_ID` name is accepted as a fallback. If both are set, `TALLY_COMPANY_ID` takes precedence. The worker also requires the exact open Tally company name in `TALLY_COMPANY_NAME`.
 
 The service-role key bypasses RLS. Keep it only in the trusted sync computer's ignored `.env` file or another protected secret store; never share it through the Admin UI, commit it, or include it in screenshots or chat. The sync URL must use HTTPS except for local development Supabase.
 
@@ -263,7 +263,7 @@ You do not need Supabase dashboard access to find your company identifier or run
 1. On the computer that runs TallyPrime, open the FINORA sync project folder.
 2. Double-click `run_sync.bat`. On first launch, it creates `.env` from `.env.example` and opens the file.
 3. Set `SUPABASE_URL` and `TALLY_HOST` from the copied project config.
-4. Paste the Company ID into `TALLY_COMPANY_ID` (not `TARGET_COMPANY_ID`).
+4. Paste the Company ID into `TALLY_COMPANY_ID`. Existing setups using `TARGET_COMPANY_ID` continue to work.
 5. Enter the exact company name open in TallyPrime as `TALLY_COMPANY_NAME`.
 6. Ask your system administrator to provision `SUPABASE_SERVICE_ROLE_KEY` securely on this computer. Never paste this secret into the Admin Portal, a public issue, or a chat.
 7. Save `.env`. It is ignored by Git and must not be sent to anyone.

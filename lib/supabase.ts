@@ -9,20 +9,29 @@ const supabaseAnonKey =
   "";
 
 let browserClient: SupabaseClient | null = null;
+let serverClient: SupabaseClient | null = null;
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(supabaseUrl && supabaseAnonKey);
 }
 
 export function getSupabase(): SupabaseClient {
+  if (typeof window !== "undefined") return getBrowserSupabase();
+  return getServerSupabase();
+}
+
+export function getServerSupabase(): SupabaseClient {
+  if (typeof window !== "undefined") {
+    throw new Error("The server Supabase client can only be used on the server.");
+  }
   if (!isSupabaseConfigured()) {
     throw new Error(
       "Missing Supabase env vars. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local.",
     );
   }
 
-  if (typeof window === "undefined") {
-    return createClient(supabaseUrl, supabaseAnonKey, {
+  if (!serverClient) {
+    serverClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -30,8 +39,7 @@ export function getSupabase(): SupabaseClient {
       },
     });
   }
-
-  return getBrowserSupabase();
+  return serverClient;
 }
 
 export function getBrowserSupabase(): SupabaseClient {
@@ -58,6 +66,7 @@ export async function fetchProfileRole(
     .from("profiles")
     .select("role")
     .eq("id", userId)
+    .returns<{ role: UserRole }[]>()
     .maybeSingle();
 
   if (error) throw new Error(`Unable to load your profile role: ${error.message}`);

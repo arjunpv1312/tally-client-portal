@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ClipboardCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -143,30 +143,36 @@ export default function EmployeePage() {
     };
   }, []);
 
-  const visibleRows = selectedCompanyId
-    ? rows.filter((row) => row.company_id === selectedCompanyId)
-    : rows;
-  const selectedCompany = rows.find(
-    (row) => row.company_id === selectedCompanyId,
-  )?.company;
+  const visibleRows = useMemo(
+    () =>
+      selectedCompanyId
+        ? rows.filter((row) => row.company_id === selectedCompanyId)
+        : rows,
+    [rows, selectedCompanyId],
+  );
+  const selectedCompany = useMemo(
+    () => rows.find((row) => row.company_id === selectedCompanyId)?.company,
+    [rows, selectedCompanyId],
+  );
 
-  function selectCompany(companyId: string) {
+  const selectCompany = useCallback((companyId: string) => {
     setSelectedCompanyId(companyId);
     notifyEmployeeCompanyChanged(companyId);
-  }
+  }, []);
 
-  async function logOutAfterTasks() {
+  const logOutAfterTasks = useCallback(async () => {
     await closeEmployeeWorkLog();
     const { error: signOutError } = await getSupabase().auth.signOut();
     if (signOutError) throw new Error(signOutError.message);
     router.replace("/login");
     router.refresh();
-  }
+  }, [router]);
 
-  async function requestLogout() {
+  const requestLogout = useCallback(async () => {
     setTaskModalOpen(true);
     return false;
-  }
+  }, []);
+  const closeTaskModal = useCallback(() => setTaskModalOpen(false), []);
 
   return (
     <AuthGuard allow="employee">
@@ -322,7 +328,7 @@ export default function EmployeePage() {
         <TaskChecklistModal
           key={workLog?.id ?? "no-work-log"}
           workLogId={workLog?.id ?? null}
-          onClose={() => setTaskModalOpen(false)}
+          onClose={closeTaskModal}
           onLogout={logOutAfterTasks}
         />
       ) : null}

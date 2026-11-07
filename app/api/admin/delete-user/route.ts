@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createClient } from "@supabase/supabase-js";
+import { getAdminSupabase } from "@/lib/supabase-admin";
 
 type DeleteUserRequest = {
   user_id?: unknown;
@@ -11,15 +11,6 @@ function jsonError(error: string, status: number) {
 }
 
 async function deleteUser(request: Request) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceRoleKey) {
-    return jsonError("SUPABASE_SERVICE_ROLE_KEY is not configured in .env.local", 500);
-  }
-  if (!supabaseUrl) {
-    return jsonError("NEXT_PUBLIC_SUPABASE_URL is not configured in .env.local.", 500);
-  }
-
   const accessToken = request.headers
     .get("authorization")
     ?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -41,9 +32,7 @@ async function deleteUser(request: Request) {
     return jsonError("user_id must be a valid UUID.", 400);
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const supabase = getAdminSupabase();
   const { data: authData, error: authError } =
     await supabase.auth.getUser(accessToken);
   if (authError || !authData.user) {
@@ -53,6 +42,7 @@ async function deleteUser(request: Request) {
     .from("profiles")
     .select("role")
     .eq("id", authData.user.id)
+    .returns<{ role: string }[]>()
     .maybeSingle();
   if (profileError) {
     return jsonError(`Unable to verify administrator access: ${profileError.message}`, 500);

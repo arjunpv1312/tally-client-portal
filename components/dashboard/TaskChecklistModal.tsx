@@ -39,6 +39,10 @@ export function TaskChecklistModal({
           .from("employee_work_logs")
           .select("completed_tasks, pending_work")
           .eq("id", workLogId)
+          .returns<{
+            completed_tasks: string[] | null;
+            pending_work: string[] | null;
+          }[]>()
           .maybeSingle();
         if (cancelled) return;
         if (loadError) {

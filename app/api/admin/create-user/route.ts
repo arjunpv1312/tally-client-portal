@@ -1,6 +1,7 @@
 import "server-only";
 
-import { createClient } from "@supabase/supabase-js";
+import { getAdminSupabase } from "@/lib/supabase-admin";
+import type { UserRole } from "@/types";
 
 type CreateUserRequest = {
   email?: unknown;
@@ -15,22 +16,6 @@ function jsonError(error: string, status: number) {
 }
 
 async function createUser(request: Request) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!serviceRoleKey) {
-    return Response.json(
-      { error: "SUPABASE_SERVICE_ROLE_KEY is not configured in .env.local" },
-      { status: 500 },
-    );
-  }
-  if (!supabaseUrl) {
-    return jsonError(
-      "NEXT_PUBLIC_SUPABASE_URL is not configured in .env.local.",
-      500,
-    );
-  }
-
   const authorization = request.headers.get("authorization");
   const accessToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!accessToken) {
@@ -81,12 +66,7 @@ async function createUser(request: Request) {
     return jsonError("company_id must be a valid UUID.", 400);
   }
 
-  const adminSupabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  const adminSupabase = getAdminSupabase();
 
   const { data: authData, error: authError } =
     await adminSupabase.auth.getUser(accessToken);
@@ -98,6 +78,7 @@ async function createUser(request: Request) {
     .from("profiles")
     .select("role")
     .eq("id", authData.user.id)
+    .returns<{ role: string }[]>()
     .maybeSingle();
 
   if (profileLookupError) {
@@ -112,6 +93,7 @@ async function createUser(request: Request) {
       .from("companies")
       .select("id")
       .eq("id", companyId)
+      .returns<{ id: string }[]>()
       .maybeSingle();
     if (companyError) {
       return jsonError(`Unable to validate company: ${companyError.message}`, 500);
@@ -135,7 +117,12 @@ async function createUser(request: Request) {
     return jsonError("Supabase did not return the created user.", 500);
   }
 
-  const profile = {
+  const profile: {
+    id: string;
+    email: string;
+    full_name: string;
+    role: UserRole;
+  } = {
     id: createdUser.user.id,
     email,
     full_name: fullName,

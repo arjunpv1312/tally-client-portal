@@ -76,6 +76,7 @@ export default function GstReportPage() {
           .from("profiles")
           .select("company_id")
           .eq("id", userData.user.id)
+          .returns<{ company_id: string | null }[]>()
           .maybeSingle();
         if (profileError) throw new Error(profileError.message);
         if (!profile?.company_id) {
@@ -167,35 +168,43 @@ export default function GstReportPage() {
   const outputTax = totals.outputCgst + totals.outputSgst + totals.outputIgst;
   const inputTax = totals.inputCgst + totals.inputSgst + totals.inputIgst;
   const netPayable = outputTax - inputTax;
-  const maxMonthlyLiability = Math.max(
-    1,
-    ...months.map(
-      (month) =>
-        month.outputCgst +
-        month.outputSgst +
-        month.outputIgst -
-        month.inputCgst -
-        month.inputSgst -
-        month.inputIgst,
-    ),
+  const maxMonthlyLiability = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...months.map(
+          (month) =>
+            month.outputCgst +
+            month.outputSgst +
+            month.outputIgst -
+            month.inputCgst -
+            month.inputSgst -
+            month.inputIgst,
+        ),
+      ),
+    [months],
   );
 
-  const exportRows = months.map((month) => ({
-    Month: formatMonth(month.month),
-    "Output CGST": month.outputCgst,
-    "Output SGST": month.outputSgst,
-    "Output IGST": month.outputIgst,
-    "Input CGST": month.inputCgst,
-    "Input SGST": month.inputSgst,
-    "Input IGST": month.inputIgst,
-    "Net Payable":
-      month.outputCgst +
-      month.outputSgst +
-      month.outputIgst -
-      month.inputCgst -
-      month.inputSgst -
-      month.inputIgst,
-  }));
+  const exportRows = useMemo(
+    () =>
+      months.map((month) => ({
+        Month: formatMonth(month.month),
+        "Output CGST": month.outputCgst,
+        "Output SGST": month.outputSgst,
+        "Output IGST": month.outputIgst,
+        "Input CGST": month.inputCgst,
+        "Input SGST": month.inputSgst,
+        "Input IGST": month.inputIgst,
+        "Net Payable":
+          month.outputCgst +
+          month.outputSgst +
+          month.outputIgst -
+          month.inputCgst -
+          month.inputSgst -
+          month.inputIgst,
+      })),
+    [months],
+  );
 
   return (
     <AuthGuard allow="company">
