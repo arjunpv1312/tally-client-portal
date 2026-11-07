@@ -42,7 +42,8 @@ if not exist ".env" (
     exit /b 1
 )
 
-echo [3/3] Starting Tally sync...
+echo [3/3] Starting Tally sync daemon (30-minute interval)...
+echo Press Ctrl+C to stop the daemon; it will attempt a final sync.
 echo.
 %PYTHON% tally_sync.py
 if errorlevel 1 (

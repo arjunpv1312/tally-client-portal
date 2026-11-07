@@ -10,7 +10,7 @@ $pythonCommand = Get-Command python -ErrorAction Stop
 $pythonPath = $pythonCommand.Source
 $action = New-ScheduledTaskAction `
     -Execute $pythonPath `
-    -Argument "`"$syncScript`"" `
+    -Argument "`"$syncScript`" --once" `
     -WorkingDirectory $repoRoot
 $trigger = New-ScheduledTaskTrigger -Daily -At "3:00 AM"
 $settings = New-ScheduledTaskSettingsSet `

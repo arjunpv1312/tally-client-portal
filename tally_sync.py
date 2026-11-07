@@ -3,11 +3,16 @@
 
 from __future__ import annotations
 
+import argparse
+import atexit
 import hashlib
 import json
 import logging
 import os
 import re
+import signal
+import ssl
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -22,7 +27,8 @@ from pathlib import Path
 from typing import Any
 
 
-TALLY_URL = "http://localhost:9000"
+TALLY_URL = "http://127.0.0.1:9000"
+SYNC_INTERVAL_SECONDS = 30 * 60
 CENT = Decimal("0.01")
 MAX_RESPONSE_BYTES = 50 * 1024 * 1024
 UPSERT_BATCH_SIZE = 250
@@ -340,12 +346,36 @@ def _retry_delay(attempt: int) -> None:
     time.sleep(min(2**attempt, 30))
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        _ = (req, fp, code, msg, headers, newurl)
+        return None
+
+
 def _http_request(
     request: urllib.request.Request, retries: int, timeout: int
 ) -> bytes:
+    handlers: list[Any] = [
+        urllib.request.ProxyHandler({}),
+        _NoRedirectHandler(),
+    ]
+    if request.full_url.startswith("https://"):
+        tls_context = ssl.create_default_context()
+        tls_context.minimum_version = ssl.TLSVersion.TLSv1_3
+        handlers.append(urllib.request.HTTPSHandler(context=tls_context))
+    opener = urllib.request.build_opener(*handlers)
+
     for attempt in range(retries + 1):
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with opener.open(request, timeout=timeout) as response:
                 body = response.read(MAX_RESPONSE_BYTES + 1)
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise SyncError("The Tally response exceeded the 50 MB limit.")
@@ -504,18 +534,23 @@ def _validate_supabase_url(value: str) -> str:
 
 
 def _validate_tally_url(value: str) -> str:
-    parsed = urllib.parse.urlsplit(value)
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError as error:
+        raise SyncError("TALLY_HOST must be exactly http://127.0.0.1:9000.") from error
     if (
-        parsed.scheme in {"http", "https"}
-        and parsed.hostname
+        parsed.scheme == "http"
+        and parsed.hostname in {"127.0.0.1", "localhost"}
+        and port == 9000
         and not parsed.username
         and not parsed.password
         and parsed.path in {"", "/"}
         and not parsed.query
         and not parsed.fragment
     ):
-        return value.rstrip("/")
-    raise SyncError("TALLY_HOST must be an HTTP(S) URL without a path or credentials.")
+        return TALLY_URL
+    raise SyncError("TALLY_HOST must be exactly http://127.0.0.1:9000.")
 
 
 def _load_env_file(path: Path) -> None:
@@ -554,9 +589,7 @@ def run_sync() -> tuple[int, int]:
     if not supabase_url_setting:
         raise SyncError("Required environment variable SUPABASE_URL is missing.")
     supabase_url = _validate_supabase_url(supabase_url_setting)
-    tally_url = _validate_tally_url(
-        os.environ.get("TALLY_HOST", TALLY_URL).strip()
-    )
+    tally_url = _validate_tally_url(os.environ.get("TALLY_HOST", TALLY_URL).strip())
     service_key = _required_environment("SUPABASE_SERVICE_ROLE_KEY")
     company_id = _company_id_from_environment()
     try:
@@ -625,12 +658,24 @@ def run_sync() -> tuple[int, int]:
     return len(voucher_rows), len(summary_rows)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Synchronize TallyPrime data.")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="run one sync and exit instead of entering 30-minute daemon mode",
+    )
+    arguments = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] %(message)s",
+    )
+
+    if not arguments.once:
+        return run_daemon()
+
     try:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="[%(levelname)s] %(message)s",
-        )
         voucher_count, summary_count = run_sync()
     except SyncError as error:
         logger.error("Tally sync failed: %s", error)
@@ -640,6 +685,95 @@ def main() -> int:
         f"Tally sync complete: {voucher_count} vouchers and "
         f"{summary_count} monthly summaries upserted.",
     )
+    return 0
+
+
+_daemon_stop_event: threading.Event | None = None
+_shutdown_flush_enabled = False
+_shutdown_flush_started = False
+
+
+def _request_daemon_shutdown(signum: int, frame: object) -> None:
+    del frame
+    if _daemon_stop_event is not None:
+        logger.info(
+            "Shutdown signal %s received; stopping after the current sync.",
+            signum,
+        )
+        _daemon_stop_event.set()
+
+
+def _flush_on_exit() -> None:
+    global _shutdown_flush_started
+    if not _shutdown_flush_enabled or _shutdown_flush_started:
+        return
+    _shutdown_flush_started = True
+    logger.info("Running final sync before daemon shutdown.")
+    try:
+        voucher_count, summary_count = run_sync()
+        logger.log(
+            SUCCESS_LEVEL,
+            "Final sync complete: %d vouchers and %d monthly summaries upserted.",
+            voucher_count,
+            summary_count,
+        )
+    except Exception:
+        logger.exception("Final sync failed during daemon shutdown.")
+
+
+def run_daemon(interval_seconds: int = SYNC_INTERVAL_SECONDS) -> int:
+    global _daemon_stop_event, _shutdown_flush_enabled, _shutdown_flush_started
+    if interval_seconds <= 0:
+        raise ValueError("The sync interval must be greater than zero.")
+
+    stop_event = threading.Event()
+    _daemon_stop_event = stop_event
+    _shutdown_flush_enabled = True
+    _shutdown_flush_started = False
+    previous_handlers = []
+    signal_numbers = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGBREAK"):
+        signal_numbers.append(signal.SIGBREAK)
+    for signum in signal_numbers:
+        previous_handlers.append(
+            (signum, signal.signal(signum, _request_daemon_shutdown))
+        )
+
+    atexit_registered = False
+    try:
+        atexit.register(_flush_on_exit)
+        atexit_registered = True
+        logger.info(
+            "FINORA sync daemon started; syncing every %d seconds.",
+            interval_seconds,
+        )
+        while not stop_event.is_set():
+            try:
+                voucher_count, summary_count = run_sync()
+                logger.log(
+                    SUCCESS_LEVEL,
+                    "Sync complete: %d vouchers and %d monthly summaries upserted.",
+                    voucher_count,
+                    summary_count,
+                )
+            except SyncError as error:
+                logger.error("Scheduled sync failed: %s", error)
+            except Exception:
+                logger.exception("Unexpected error during scheduled sync.")
+
+            if not stop_event.wait(interval_seconds):
+                continue
+            break
+    except KeyboardInterrupt:
+        stop_event.set()
+    finally:
+        _flush_on_exit()
+        if atexit_registered:
+            atexit.unregister(_flush_on_exit)
+        for signum, previous_handler in previous_handlers:
+            signal.signal(signum, previous_handler)
+        _daemon_stop_event = None
+        _shutdown_flush_enabled = False
     return 0
 
 

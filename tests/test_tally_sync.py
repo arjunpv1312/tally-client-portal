@@ -1,5 +1,6 @@
 import unittest
 import os
+import ssl
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -7,9 +8,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.error import URLError
 from urllib.request import Request
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from tally_sync import (
+    _NoRedirectHandler,
     SyncError,
     _load_env_file,
     _http_request,
@@ -20,6 +22,7 @@ from tally_sync import (
     build_daybook_request,
     main,
     parse_daybook_xml,
+    run_daemon,
     summarize_vouchers,
 )
 
@@ -121,15 +124,49 @@ class TallySyncTests(unittest.TestCase):
         request = Request("http://localhost:9000")
         with (
             patch(
-                "tally_sync.urllib.request.urlopen",
-                side_effect=[URLError("offline"), BytesIO(b"response")],
+                "tally_sync.urllib.request.build_opener"
             ) as urlopen,
+            patch("tally_sync.urllib.request.ProxyHandler") as proxy_handler,
             patch("tally_sync._retry_delay") as retry_delay,
         ):
+            opener = Mock()
+            opener.open.side_effect = [URLError("offline"), BytesIO(b"response")]
+            urlopen.return_value = opener
             response = _http_request(request, retries=1, timeout=1)
         self.assertEqual(response, b"response")
-        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(opener.open.call_count, 2)
+        proxy_handler.assert_called_once_with({})
         retry_delay.assert_called_once_with(0)
+
+    def test_https_requests_use_direct_tls_13_transport(self) -> None:
+        request = Request("https://project.example/rest/v1/vouchers")
+        with (
+            patch("tally_sync.urllib.request.build_opener") as build_opener,
+            patch("tally_sync.urllib.request.ProxyHandler") as proxy_handler,
+            patch("tally_sync.urllib.request.HTTPSHandler") as https_handler,
+        ):
+            opener = Mock()
+            opener.open.return_value = BytesIO(b"response")
+            build_opener.return_value = opener
+            self.assertEqual(_http_request(request, retries=0, timeout=1), b"response")
+
+        proxy_handler.assert_called_once_with({})
+        context = https_handler.call_args.kwargs["context"]
+        self.assertEqual(context.minimum_version, ssl.TLSVersion.TLSv1_3)
+        opener.open.assert_called_once_with(request, timeout=1)
+
+    def test_http_redirects_are_not_followed(self) -> None:
+        redirect_handler = _NoRedirectHandler()
+        self.assertIsNone(
+            redirect_handler.redirect_request(
+                Request("https://project.example/rest/v1/vouchers"),
+                Mock(),
+                307,
+                "Temporary Redirect",
+                {},
+                "https://other.example/rest/v1/vouchers",
+            )
+        )
 
     def test_requires_tls_for_remote_supabase(self) -> None:
         self.assertEqual(
@@ -145,11 +182,20 @@ class TallySyncTests(unittest.TestCase):
 
     def test_validates_tally_host(self) -> None:
         self.assertEqual(
-            _validate_tally_url("http://localhost:9000/"),
-            "http://localhost:9000",
+            _validate_tally_url("http://127.0.0.1:9000/"),
+            "http://127.0.0.1:9000",
         )
-        with self.assertRaises(SyncError):
-            _validate_tally_url("http://localhost:9000/path")
+        self.assertEqual(
+            _validate_tally_url("http://localhost:9000"),
+            "http://127.0.0.1:9000",
+        )
+        for unsafe_url in (
+            "http://192.168.1.20:9000",
+            "http://127.0.0.1:9001",
+            "https://127.0.0.1:9000",
+        ):
+            with self.subTest(url=unsafe_url), self.assertRaises(SyncError):
+                _validate_tally_url(unsafe_url)
 
     def test_loads_env_file_without_overriding_existing_environment(self) -> None:
         with TemporaryDirectory() as directory:
@@ -197,16 +243,31 @@ class TallySyncTests(unittest.TestCase):
     def test_main_reports_success_through_structured_logging(self) -> None:
         with patch("tally_sync.run_sync", return_value=(2, 1)):
             with self.assertLogs("tally_sync", level="INFO") as logs:
-                self.assertEqual(main(), 0)
+                self.assertEqual(main(["--once"]), 0)
         self.assertEqual(logs.records[-1].levelname, "SUCCESS")
         self.assertIn("Tally sync complete", logs.records[-1].getMessage())
 
     def test_main_reports_sync_errors_through_structured_logging(self) -> None:
         with patch("tally_sync.run_sync", side_effect=SyncError("missing config")):
             with self.assertLogs("tally_sync", level="ERROR") as logs:
-                self.assertEqual(main(), 1)
+                self.assertEqual(main(["--once"]), 1)
         self.assertEqual(logs.records[-1].levelname, "ERROR")
         self.assertIn("Tally sync failed: missing config", logs.records[-1].getMessage())
+
+    def test_daemon_runs_periodic_sync_then_final_shutdown_flush(self) -> None:
+        stop_event = Mock()
+        stop_event.is_set.return_value = False
+        stop_event.wait.return_value = True
+        with (
+            patch("tally_sync.threading.Event", return_value=stop_event),
+            patch("tally_sync.signal.signal"),
+            patch("tally_sync.atexit.register"),
+            patch("tally_sync.atexit.unregister"),
+            patch("tally_sync.run_sync", return_value=(1, 1)) as sync,
+        ):
+            self.assertEqual(run_daemon(interval_seconds=1800), 0)
+        self.assertEqual(sync.call_count, 2)
+        stop_event.wait.assert_called_once_with(1800)
 
 
 if __name__ == "__main__":

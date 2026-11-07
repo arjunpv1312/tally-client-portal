@@ -454,7 +454,7 @@ export default function DashboardPage() {
           if (refreshTimeout) clearTimeout(refreshTimeout);
           refreshTimeout = setTimeout(() => {
             void refreshFromRealtime();
-          }, 250);
+          }, 1500);
         },
       )
       .on(
@@ -469,7 +469,7 @@ export default function DashboardPage() {
           if (refreshTimeout) clearTimeout(refreshTimeout);
           refreshTimeout = setTimeout(() => {
             void refreshFromRealtime();
-          }, 250);
+          }, 1500);
         },
       )
       .subscribe((status, subscriptionError) => {
@@ -650,7 +650,7 @@ export default function DashboardPage() {
                           return (
                             <tr
                               key={voucher.id}
-                              className="border-t border-slate-100 transition-colors hover:bg-finora-gold/5 dark:border-finora-gold/10 dark:hover:bg-finora-gold/5"
+                              className="dashboard-voucher-row border-t border-slate-100 transition-colors hover:bg-finora-gold/5 dark:border-finora-gold/10 dark:hover:bg-finora-gold/5"
                             >
                               <td className="whitespace-nowrap px-5 py-3 text-slate-600 dark:text-slate-300">
                                 {voucherDate && !Number.isNaN(voucherDate.getTime())
@@ -688,7 +688,7 @@ export default function DashboardPage() {
                       return (
                         <article
                           key={voucher.id}
-                          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
+                          className="dashboard-voucher-row rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-finora-gold/15 dark:bg-finora-dark/50"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
