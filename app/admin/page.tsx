@@ -53,8 +53,9 @@ type EmployeeWorkLog = {
   login_time: string;
   logout_time: string | null;
   total_hours: number | string | null;
-  completed_tasks: string[] | null;
-  pending_work: string[] | null;
+  completed_tasks: string[] | string | null;
+  pending_work: string[] | string | null;
+  pending_tasks?: string[] | string | null;
 };
 
 const tabs: { id: Tab; label: string; icon: typeof Building2 }[] = [
@@ -109,6 +110,11 @@ function formatDate(value: string | null | undefined) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
     new Date(value),
   );
+}
+
+function taskList(value: string[] | string | null | undefined): string[] {
+  if (Array.isArray(value)) return value;
+  return value ? [value] : [];
 }
 
 function roleLabel(role: UserRole) {
@@ -201,14 +207,23 @@ export default function AdminPage() {
     if (assignmentResult.error) {
       assignmentResult = await assignmentQuery(assignmentVariants[3]);
     }
-    const workLogResult = await supabase
-      .from("employee_work_logs")
-      .select(
-        "id, user_id, company_id, login_time, logout_time, total_hours, completed_tasks, pending_work",
-      )
-      .order("login_time", { ascending: false })
-      .limit(250)
-      .returns<EmployeeWorkLog[]>();
+    const workLogQuery = (columns: string) =>
+      supabase
+        .from("employee_work_logs")
+        .select(columns)
+        .order("login_time", { ascending: false })
+        .limit(250)
+        .returns<EmployeeWorkLog[]>();
+    const workLogColumnSets = [
+      "id, user_id, company_id, login_time, logout_time, total_hours, completed_tasks, pending_work",
+      "id, user_id, company_id, login_time, logout_time, total_hours, completed_tasks, pending_tasks",
+      "id, user_id, company_id, login_time, logout_time, total_hours",
+    ];
+    let workLogResult = await workLogQuery(workLogColumnSets[0]);
+    for (const columns of workLogColumnSets.slice(1)) {
+      if (!workLogResult.error) break;
+      workLogResult = await workLogQuery(columns);
+    }
     setAssignmentWarning(
       !assignmentResult.error && !hasStatusColumn
         ? "The entry_status column is unavailable; assignments are shown as Active until the schema is updated."
@@ -249,7 +264,15 @@ export default function AdminPage() {
         };
       }),
     );
-    if (!workLogResult.error) setWorkLogs(workLogResult.data ?? []);
+    if (!workLogResult.error) {
+      setWorkLogs(
+        (workLogResult.data ?? []).map((log) => ({
+          ...log,
+          completed_tasks: taskList(log.completed_tasks || ""),
+          pending_work: taskList(log.pending_work || log.pending_tasks || ""),
+        })),
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -1457,8 +1480,8 @@ export default function AdminPage() {
                                 {log.total_hours == null ? "—" : `${log.total_hours} h`}
                               </p>
                               <TaskBadges
-                                completed={log.completed_tasks ?? []}
-                                pending={log.pending_work ?? []}
+                                completed={taskList(log.completed_tasks || "")}
+                                pending={taskList(log.pending_work || log.pending_tasks || "")}
                               />
                             </article>
                           ))}
@@ -1487,10 +1510,16 @@ export default function AdminPage() {
                                   {log.total_hours == null ? "—" : `${log.total_hours} h`}
                                 </td>
                                 <td className="px-4 py-3">
-                                  <TaskBadges completed={log.completed_tasks ?? []} pending={[]} />
+                                  <TaskBadges
+                                    completed={taskList(log.completed_tasks || "")}
+                                    pending={[]}
+                                  />
                                 </td>
                                 <td className="px-4 py-3">
-                                  <TaskBadges completed={[]} pending={log.pending_work ?? []} />
+                                  <TaskBadges
+                                    completed={[]}
+                                    pending={taskList(log.pending_work || log.pending_tasks || "")}
+                                  />
                                 </td>
                               </tr>
                             );

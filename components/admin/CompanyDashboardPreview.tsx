@@ -9,7 +9,10 @@ import {
 } from "@/components/dashboard/Visualizations";
 
 type Summary = {
-  period_start: string;
+  period_start?: string;
+  period_date?: string | null;
+  month?: string | null;
+  created_at?: string | null;
   total_sales: number | string | null;
   total_purchases: number | string | null;
   total_expenses: number | string | null;
@@ -72,30 +75,55 @@ export function CompanyDashboardPreview({
     async function load() {
       setLoading(true);
       setError("");
-      const [summaryResult, voucherResult] = await Promise.all([
+      const summaryQuery = (dateColumns: string, orderColumn: string) =>
         supabase
           .from("financial_summaries")
-          .select("period_start, total_sales, total_purchases, total_expenses, net_profit")
+          .select(
+            `id, company_id, ${dateColumns}, total_sales, total_purchases, total_expenses, net_profit`,
+          )
           .eq("company_id", company.id)
-          .order("period_start", { ascending: true })
-          .returns<Summary[]>(),
-        supabase
-          .from("vouchers")
-          .select("id, date, voucher_date, voucher_number, voucher_type, party_name, total_amount, amount, sales_amount, purchase_amount, expense_amount")
-          .eq("company_id", company.id)
-          .order("voucher_date", { ascending: false })
-          .limit(1000)
-          .returns<Voucher[]>(),
-      ]);
+          .order(orderColumn, { ascending: true })
+          .returns<Summary[]>();
+      const summaryPlans = [
+        { dateColumns: "period_start, period_end", orderColumn: "period_start" },
+        { dateColumns: "period_date, month", orderColumn: "period_date" },
+        { dateColumns: "period_date", orderColumn: "period_date" },
+        { dateColumns: "month", orderColumn: "month" },
+        { dateColumns: "created_at", orderColumn: "created_at" },
+      ];
+      let summaryResult = await summaryQuery(
+        summaryPlans[0].dateColumns,
+        summaryPlans[0].orderColumn,
+      );
+      for (const plan of summaryPlans.slice(1)) {
+        if (!summaryResult.error) break;
+        summaryResult = await summaryQuery(plan.dateColumns, plan.orderColumn);
+      }
+      const voucherResult = await supabase
+        .from("vouchers")
+        .select("id, date, voucher_date, voucher_number, voucher_type, party_name, total_amount, amount, sales_amount, purchase_amount, expense_amount")
+        .eq("company_id", company.id)
+        .order("voucher_date", { ascending: false })
+        .limit(1000)
+        .returns<Voucher[]>();
       if (cancelled) return;
-      if (summaryResult.error || voucherResult.error) {
+      if (voucherResult.error) {
         setError(
-          summaryResult.error?.message ??
-            voucherResult.error?.message ??
+          voucherResult.error.message ??
             "Unable to load this company's dashboard.",
         );
       } else {
-        setSummaries(summaryResult.data ?? []);
+        setSummaries(
+          (summaryResult.data ?? []).map((summary) => ({
+            ...summary,
+            period_start:
+              summary.period_start ??
+              summary.period_date ??
+              summary.month ??
+              summary.created_at?.slice(0, 10) ??
+              "",
+          })),
+        );
         setVouchers(voucherResult.data ?? []);
       }
       setLoading(false);
@@ -144,10 +172,12 @@ export function CompanyDashboardPreview({
   const monthlyData = useMemo(
     () => {
       const summaryMonths = new Set(
-        summaries.map((summary) => summary.period_start.slice(0, 7)),
+        summaries
+          .map((summary) => summary.period_start?.slice(0, 7) ?? "")
+          .filter(Boolean),
       );
       const summaryData = summaries.map((summary) => ({
-        period: summary.period_start.slice(0, 7),
+        period: summary.period_start?.slice(0, 7) ?? "",
         sales: amount(summary.total_sales),
         purchases: amount(summary.total_purchases),
         expenses: amount(summary.total_expenses),
@@ -159,9 +189,9 @@ export function CompanyDashboardPreview({
           ...month,
           netProfit: month.sales - month.purchases - month.expenses,
         }));
-      return [...summaryData, ...voucherFallback].sort((left, right) =>
-        left.period.localeCompare(right.period),
-      );
+      return [...summaryData, ...voucherFallback]
+        .filter((summary) => summary.period)
+        .sort((left, right) => left.period.localeCompare(right.period));
     },
     [summaries, vouchers],
   );

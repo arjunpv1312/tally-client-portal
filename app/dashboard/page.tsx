@@ -28,8 +28,12 @@ import { getBrowserSupabase, getSupabase } from "@/lib/supabase";
 
 type SummaryRow = {
   id?: string;
-  period_start: string;
-  period_end: string;
+  company_id?: string;
+  period_start?: string;
+  period_end?: string;
+  period_date?: string | null;
+  month?: string | null;
+  created_at?: string | null;
   total_sales: number | string;
   total_purchases: number | string;
   total_expenses: number | string;
@@ -67,7 +71,7 @@ type DashboardData = {
   companyId: string;
   companyName: string;
   profileName: string | null;
-  summaries: SummaryRow[];
+  summaries: (SummaryRow & { period_start: string })[];
   vouchers: VoucherRow[];
   summaryWarning: string | null;
   voucherWarning: string | null;
@@ -219,28 +223,80 @@ async function fetchDashboardData(
           : "Unable to load voucher data.";
     }
   }
-  const summaryQuery = (columns: string) =>
-    supabase
+  const summaryQuery = (
+    columns: string,
+    periodColumn: string,
+    includesPeriodEnd: boolean,
+  ) => {
+    let query = supabase
       .from("financial_summaries")
       .select(columns)
-      .eq("company_id", profile.company_id)
-      .gte("period_end", startDate)
-      .lte("period_start", endDate)
-      .order("period_start", { ascending: true })
+      .eq("company_id", profile.company_id);
+    if (includesPeriodEnd) {
+      query = query.gte("period_end", startDate).lte("period_start", endDate);
+    } else if (periodColumn === "month") {
+      query = query
+        .gte("month", startDate.slice(0, 7))
+        .lte("month", endDate.slice(0, 7));
+    } else {
+      query = query.gte(periodColumn, startDate).lte(periodColumn, endDate);
+    }
+    return query
+      .order(periodColumn, { ascending: true })
       .returns<SummaryRow[]>();
-  const summaryColumnSets = [
-    "id, total_sales, total_purchases, total_expenses, net_profit, cash_in_hand, bank_balance, period_start, period_end, updated_at, gst_payable, gst_input, cgst_payable, sgst_payable, igst_payable, last_synced_at",
-    "id, total_sales, total_purchases, total_expenses, net_profit, period_start, period_end, updated_at, gst_payable, gst_input, cgst_payable, sgst_payable, igst_payable, last_synced_at",
-    "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, gst_payable, gst_input, last_synced_at",
-    "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, cgst_payable, sgst_payable, igst_payable, last_synced_at",
-    "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, cgst_amount, sgst_amount, igst_amount, last_synced_at",
-    "period_start, period_end, total_sales, total_purchases, total_expenses, net_profit, last_synced_at",
+  };
+  const metricColumnSets = [
+    "cash_in_hand, bank_balance, updated_at, gst_payable, gst_input, cgst_payable, sgst_payable, igst_payable, last_synced_at",
+    "updated_at, gst_payable, gst_input, cgst_payable, sgst_payable, igst_payable, last_synced_at",
+    "gst_payable, gst_input, cgst_payable, sgst_payable, igst_payable, last_synced_at",
+    "gst_payable, gst_input, last_synced_at",
+    "cgst_payable, sgst_payable, igst_payable, last_synced_at",
+    "cgst_amount, sgst_amount, igst_amount, last_synced_at",
+    "last_synced_at",
+    "",
+  ];
+  const summaryQueryPlans = [
+    ...metricColumnSets.map((metrics) => ({
+      periodColumn: "period_start",
+      includesPeriodEnd: true,
+      dateColumns: "period_start, period_end",
+      metrics,
+    })),
+    ...[
+      { periodColumn: "period_date", dateColumns: "period_date, month" },
+      { periodColumn: "period_date", dateColumns: "period_date" },
+      { periodColumn: "month", dateColumns: "month" },
+      { periodColumn: "created_at", dateColumns: "created_at" },
+    ].flatMap(({ periodColumn, dateColumns }) =>
+      metricColumnSets.map((metrics) => ({
+        periodColumn,
+        includesPeriodEnd: false,
+        dateColumns,
+        metrics,
+      })),
+    ),
   ];
   let summaries: SummaryRow[] = [];
   let summaryWarning: string | null = null;
-  for (const columns of summaryColumnSets) {
+  for (const plan of summaryQueryPlans) {
     try {
-      const result = await summaryQuery(columns);
+      const columns = [
+        "id",
+        "company_id",
+        plan.dateColumns,
+        "total_sales",
+        "total_purchases",
+        "total_expenses",
+        "net_profit",
+        plan.metrics,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      const result = await summaryQuery(
+        columns,
+        plan.periodColumn,
+        plan.includesPeriodEnd,
+      );
       if (!result.error) {
         summaries = result.data ?? [];
         summaryWarning = null;
@@ -263,7 +319,6 @@ async function fetchDashboardData(
   const normalizedSummaries = summaries.map((summary) => {
     const {
       id,
-      period_start = "",
       period_end = "",
       total_sales = 0,
       total_purchases = 0,
@@ -282,6 +337,12 @@ async function fetchDashboardData(
       updated_at,
       last_synced_at,
     } = summary ?? {};
+    const period_start =
+      summary.period_start ??
+      summary.period_date ??
+      summary.month ??
+      summary.created_at?.slice(0, 10) ??
+      "";
     return {
       id,
       period_start,
