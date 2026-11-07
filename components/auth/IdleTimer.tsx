@@ -8,6 +8,7 @@ import { closeEmployeeWorkLog } from "@/lib/employee-work-logs";
 const WARNING_AFTER_MS = 25 * 60 * 1000;
 const LOGOUT_AFTER_MS = 30 * 60 * 1000;
 const ACTIVITY_THROTTLE_MS = 1000;
+const LAST_ACTIVITY_KEY = "finora_last_activity";
 
 function clearStoredAuthTokens() {
   for (const storage of [window.localStorage, window.sessionStorage]) {
@@ -29,6 +30,7 @@ export function IdleTimer() {
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
     const supabase = getBrowserSupabase();
+    let storageErrorReported = false;
 
     function clearTimers() {
       if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
@@ -39,21 +41,88 @@ export function IdleTimer() {
 
     function startTimers() {
       clearTimers();
-      setShowWarning(false);
       if (!userIdRef.current || loggingOutRef.current) return;
 
-      warningTimerRef.current = setTimeout(() => {
-        setShowWarning(true);
-      }, WARNING_AFTER_MS);
+      const elapsed = Math.max(0, Date.now() - lastActivityAtRef.current);
+      setShowWarning(elapsed >= WARNING_AFTER_MS);
+      if (elapsed < WARNING_AFTER_MS) {
+        warningTimerRef.current = setTimeout(() => {
+          setShowWarning(true);
+        }, WARNING_AFTER_MS - elapsed);
+      }
       logoutTimerRef.current = setTimeout(() => {
         void expireSession();
-      }, LOGOUT_AFTER_MS);
+      }, Math.max(0, LOGOUT_AFTER_MS - elapsed));
+    }
+
+    function readLastActivity(): number | null {
+      try {
+        const storedValue = window.localStorage.getItem(LAST_ACTIVITY_KEY);
+        if (!storedValue) return null;
+        const timestamp = Number(storedValue);
+        return Number.isFinite(timestamp) && timestamp > 0
+          ? timestamp
+          : null;
+      } catch (storageError) {
+        if (!storageErrorReported) {
+          storageErrorReported = true;
+          toast.error(
+            storageError instanceof Error
+              ? `Unable to read stored session activity: ${storageError.message}`
+              : "Unable to read stored session activity.",
+          );
+        }
+        return null;
+      }
+    }
+
+    function storeLastActivity(timestamp: number): void {
+      try {
+        window.localStorage.setItem(LAST_ACTIVITY_KEY, String(timestamp));
+        lastActivityAtRef.current = timestamp;
+      } catch (storageError) {
+        if (!storageErrorReported) {
+          storageErrorReported = true;
+          toast.error(
+            storageError instanceof Error
+              ? `Unable to store session activity: ${storageError.message}`
+              : "Unable to store session activity.",
+          );
+        }
+        lastActivityAtRef.current = timestamp;
+      }
+    }
+
+    function checkIdleStatus() {
+      if (!userIdRef.current || loggingOutRef.current) return;
+      const storedTimestamp = readLastActivity();
+      if (storedTimestamp !== null) {
+        lastActivityAtRef.current = storedTimestamp;
+      }
+      if (!lastActivityAtRef.current) {
+        storeLastActivity(Date.now());
+      }
+      const elapsed = Date.now() - lastActivityAtRef.current;
+      if (elapsed >= LOGOUT_AFTER_MS) {
+        void expireSession();
+        return;
+      }
+      startTimers();
     }
 
     async function expireSession() {
       if (loggingOutRef.current) return;
       loggingOutRef.current = true;
       clearTimers();
+      try {
+        window.localStorage.removeItem(LAST_ACTIVITY_KEY);
+      } catch (storageError) {
+        toast.error(
+          storageError instanceof Error
+            ? `Unable to clear stored session activity: ${storageError.message}`
+            : "Unable to clear stored session activity.",
+        );
+      }
 
       try {
         await closeEmployeeWorkLog();
@@ -86,7 +155,7 @@ export function IdleTimer() {
               : "Unable to clear stored authentication data.",
           );
         } finally {
-          window.location.replace("/login?reason=timeout");
+          window.location.replace("/login?reason=idle_timeout");
         }
       }
     }
@@ -94,13 +163,58 @@ export function IdleTimer() {
     function handleActivity() {
       if (!userIdRef.current || loggingOutRef.current) return;
       const now = Date.now();
+      const storedTimestamp = readLastActivity();
+      if (storedTimestamp !== null) {
+        lastActivityAtRef.current = storedTimestamp;
+      }
       if (now - lastActivityAtRef.current >= LOGOUT_AFTER_MS) {
         void expireSession();
         return;
       }
       if (now - lastActivityAtRef.current < ACTIVITY_THROTTLE_MS) return;
-      lastActivityAtRef.current = now;
+      storeLastActivity(now);
       startTimers();
+    }
+
+    function handleAuthState(event: string, session: Parameters<
+      Parameters<typeof supabase.auth.onAuthStateChange>[0]
+    >[1]) {
+      const nextUserId = session?.user.id ?? null;
+      if (nextUserId !== userIdRef.current) {
+        userIdRef.current = nextUserId;
+        loggingOutRef.current = false;
+        if (!nextUserId) {
+          clearTimers();
+          setShowWarning(false);
+          try {
+            window.localStorage.removeItem(LAST_ACTIVITY_KEY);
+          } catch (storageError) {
+            toast.error(
+              storageError instanceof Error
+                ? `Unable to clear stored session activity: ${storageError.message}`
+                : "Unable to clear stored session activity.",
+            );
+          }
+          return;
+        }
+        if (event === "SIGNED_IN") {
+          storeLastActivity(Date.now());
+        } else {
+          lastActivityAtRef.current =
+            readLastActivity() ?? Date.now();
+          if (readLastActivity() === null) {
+            storeLastActivity(lastActivityAtRef.current);
+          }
+        }
+        checkIdleStatus();
+      } else if (event === "SIGNED_OUT") {
+        clearTimers();
+        setShowWarning(false);
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") checkIdleStatus();
     }
 
     const activityEvents = [
@@ -116,18 +230,7 @@ export function IdleTimer() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      const nextUserId = session?.user.id ?? null;
-      if (nextUserId !== userIdRef.current) {
-        userIdRef.current = nextUserId;
-        lastActivityAtRef.current = Date.now();
-        loggingOutRef.current = false;
-        startTimers();
-      } else if (event === "SIGNED_OUT") {
-        clearTimers();
-        setShowWarning(false);
-      }
-    });
+    } = supabase.auth.onAuthStateChange(handleAuthState);
 
     void supabase.auth.getSession().then(({ data, error }) => {
       if (error) {
@@ -137,14 +240,27 @@ export function IdleTimer() {
       const nextUserId = data.session?.user.id ?? null;
       if (nextUserId !== userIdRef.current) {
         userIdRef.current = nextUserId;
-        lastActivityAtRef.current = Date.now();
-        startTimers();
+        loggingOutRef.current = false;
+        lastActivityAtRef.current = readLastActivity() ?? Date.now();
+        if (readLastActivity() === null) {
+          storeLastActivity(lastActivityAtRef.current);
+        }
+        checkIdleStatus();
       }
     });
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", checkIdleStatus);
+    window.addEventListener("pageshow", checkIdleStatus);
+    window.addEventListener("storage", checkIdleStatus);
 
     return () => {
       clearTimers();
       subscription.unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", checkIdleStatus);
+      window.removeEventListener("pageshow", checkIdleStatus);
+      window.removeEventListener("storage", checkIdleStatus);
       for (const eventName of activityEvents) {
         window.removeEventListener(eventName, handleActivity);
       }
