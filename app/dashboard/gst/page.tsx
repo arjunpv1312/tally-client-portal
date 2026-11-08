@@ -221,7 +221,7 @@ export default function GstReportPage() {
         <motion.main
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
+          transition={{ type: "spring", stiffness: 350, damping: 25 }}
           className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8"
         >
           <DateFilter onChange={setDateRange} />
@@ -251,17 +251,17 @@ export default function GstReportPage() {
                 ].map(([label, value]) => (
                   <article
                     key={String(label)}
-                    className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]"
+                    className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm transition-colors hover:border-[#E5C365]/40 dark:border-white/[0.08] dark:bg-[#111722] dark:hover:border-[#E5C365]/30"
                   >
                     <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                    <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">
                       {currency(Number(value))}
                     </p>
                   </article>
                 ))}
               </section>
 
-              <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 dark:border-[#334155] dark:bg-[#1E293B]">
+              <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 dark:border-white/[0.08] dark:bg-[#111722]">
                 <h2 className="font-semibold text-slate-900 dark:text-slate-100">
                   Tax component breakdown
                 </h2>
@@ -273,10 +273,10 @@ export default function GstReportPage() {
                   ].map(([tax, output, input]) => (
                     <div key={String(tax)} className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
                       <h3 className="font-medium">{tax}</h3>
-                      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                      <p className="mt-2 font-mono text-sm tabular-nums text-slate-500 dark:text-slate-400">
                         Output: {currency(Number(output))}
                       </p>
-                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                      <p className="font-mono text-sm tabular-nums text-slate-500 dark:text-slate-400">
                         Input: {currency(Number(input))}
                       </p>
                     </div>
@@ -284,7 +284,7 @@ export default function GstReportPage() {
                 </div>
               </section>
 
-              <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 dark:border-[#334155] dark:bg-[#1E293B]">
+              <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 dark:border-white/[0.08] dark:bg-[#111722]">
                 <h2 className="font-semibold text-slate-900 dark:text-slate-100">
                   Monthly net tax liability
                 </h2>
@@ -306,7 +306,7 @@ export default function GstReportPage() {
                         <div key={month.month}>
                           <div className="mb-1 flex justify-between gap-3 text-sm">
                             <span>{formatMonth(month.month)}</span>
-                            <span className="font-medium">{currency(liability)}</span>
+                            <span className="font-mono font-medium tabular-nums">{currency(liability)}</span>
                           </div>
                           <div
                             className="h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"

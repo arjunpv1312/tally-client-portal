@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export type DateRange = {
   startDate: string;
@@ -53,11 +53,37 @@ export function DateFilter({ onChange }: DateFilterProps) {
   const [customRange, setCustomRange] = useState<DateRange>(() => getRange("month"));
   const [validationError, setValidationError] = useState("");
 
-  function choosePreset(preset: Exclude<Preset, "custom">) {
+  const choosePreset = useCallback((preset: Exclude<Preset, "custom">) => {
     setSelectedPreset(preset);
     setValidationError("");
     onChange(getRange(preset));
-  }
+  }, [onChange]);
+
+  useEffect(() => {
+    let storedPresetTimer: number | undefined;
+    function applyRequestedPreset(event: Event) {
+      const preset = (event as CustomEvent<{ preset?: string }>).detail?.preset;
+      if (presets.some((item) => item.id === preset)) {
+        choosePreset(preset as Exclude<Preset, "custom">);
+      }
+    }
+
+    window.addEventListener("finora:date-preset", applyRequestedPreset);
+    const storedPreset = window.sessionStorage.getItem("finora_date_preset");
+    if (presets.some((item) => item.id === storedPreset)) {
+      window.sessionStorage.removeItem("finora_date_preset");
+      storedPresetTimer = window.setTimeout(
+        () => choosePreset(storedPreset as Exclude<Preset, "custom">),
+        0,
+      );
+    }
+    return () => {
+      if (storedPresetTimer !== undefined) {
+        window.clearTimeout(storedPresetTimer);
+      }
+      window.removeEventListener("finora:date-preset", applyRequestedPreset);
+    };
+  }, [choosePreset]);
 
   function changeCustomRange(nextRange: DateRange) {
     setSelectedPreset("custom");
@@ -77,7 +103,7 @@ export function DateFilter({ onChange }: DateFilterProps) {
   return (
     <section
       aria-label="Filter financial data by date"
-      className="space-y-3 rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 dark:border-[#334155] dark:bg-[#1E293B]"
+      className="space-y-3 rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 dark:border-white/[0.08] dark:bg-[#111722]"
     >
       <div className="flex flex-wrap gap-2">
         {presets.map((preset) => (
@@ -86,9 +112,9 @@ export function DateFilter({ onChange }: DateFilterProps) {
             type="button"
             aria-pressed={selectedPreset === preset.id}
             onClick={() => choosePreset(preset.id)}
-            className={`min-h-10 rounded-lg border px-3 text-sm font-medium transition ${
+            className={`min-h-10 rounded-lg border px-3 text-sm font-medium transition active:scale-[0.98] ${
               selectedPreset === preset.id
-                ? "border-blue-600 bg-blue-600 text-white dark:border-[#60A5FA] dark:bg-[#60A5FA] dark:text-slate-950"
+                ? "border-[#E5C365] bg-[#E5C365] text-slate-950"
                 : "border-slate-200 text-slate-700 hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             }`}
           >
@@ -99,9 +125,9 @@ export function DateFilter({ onChange }: DateFilterProps) {
           type="button"
           aria-pressed={selectedPreset === "custom"}
           onClick={() => setSelectedPreset("custom")}
-          className={`min-h-10 rounded-lg border px-3 text-sm font-medium transition ${
+          className={`min-h-10 rounded-lg border px-3 text-sm font-medium transition active:scale-[0.98] ${
             selectedPreset === "custom"
-              ? "border-blue-600 bg-blue-600 text-white dark:border-[#60A5FA] dark:bg-[#60A5FA] dark:text-slate-950"
+              ? "border-[#E5C365] bg-[#E5C365] text-slate-950"
               : "border-slate-200 text-slate-700 hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
           }`}
         >

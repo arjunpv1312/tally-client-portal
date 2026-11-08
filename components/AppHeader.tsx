@@ -8,6 +8,7 @@ import { useState, type ReactNode } from "react";
 import { Menu, X } from "lucide-react";
 import { LogoutButton } from "@/components/LogoutButton";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { CommandPalette } from "@/components/CommandPalette";
 
 export type HeaderNavItem = {
   label: string;
@@ -25,6 +26,8 @@ type AppHeaderProps = {
   activeNavItem?: string;
   contextControl?: ReactNode;
   onLogoutRequest?: () => Promise<boolean>;
+  commandCompanies?: { id: string; name: string }[];
+  onCommandCompanySelect?: (company: { id: string; name: string }) => void;
 };
 
 function initials(name: string) {
@@ -46,6 +49,8 @@ export function AppHeader({
   activeNavItem,
   contextControl,
   onLogoutRequest,
+  commandCompanies,
+  onCommandCompanySelect,
 }: AppHeaderProps) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -62,9 +67,9 @@ export function AppHeader({
   }
 
   const linkClass = (active: boolean) =>
-    `flex min-h-12 items-center rounded-xl px-3 text-sm font-medium transition-colors active:scale-95 ${
+    `relative flex min-h-12 items-center rounded-xl px-3 text-sm font-medium transition-colors duration-150 active:scale-[0.98] ${
       active
-        ? "capitalize bg-finora-gold/10 text-finora-gold-dark dark:text-finora-gold-light"
+        ? "capitalize text-finora-gold-dark dark:text-finora-gold-light"
         : "capitalize text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5"
     }`;
 
@@ -109,7 +114,14 @@ export function AppHeader({
               aria-current={itemIsActive(item) ? "page" : undefined}
               className={linkClass(itemIsActive(item))}
             >
-              {item.label}
+              {itemIsActive(item) ? (
+                <motion.span
+                  layoutId="nav-active-bg"
+                  transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                  className="absolute inset-0 rounded-xl bg-finora-gold/10"
+                />
+              ) : null}
+              <span className="relative z-10">{item.label}</span>
             </Link>
           ) : (
             <button
@@ -119,13 +131,25 @@ export function AppHeader({
               aria-current={itemIsActive(item) ? "page" : undefined}
               className={linkClass(itemIsActive(item))}
             >
-              {item.label}
+              {itemIsActive(item) ? (
+                <motion.span
+                  layoutId="nav-active-bg"
+                  transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                  className="absolute inset-0 rounded-xl bg-finora-gold/10"
+                />
+              ) : null}
+              <span className="relative z-10">{item.label}</span>
             </button>
           ),
         )}
       </nav>
 
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+        <CommandPalette
+          roleLabel={roleLabel}
+          companies={commandCompanies}
+          onCompanySelect={onCommandCompanySelect}
+        />
         {contextControl ? (
           <div className="hidden sm:block">{contextControl}</div>
         ) : null}
@@ -189,7 +213,7 @@ export function AppHeader({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.18 }}
+              transition={{ type: "spring", stiffness: 350, damping: 25 }}
               onClick={() => setMenuOpen(false)}
               className="fixed inset-0 z-40 cursor-default bg-slate-950/45 backdrop-blur-md md:hidden"
             />
@@ -198,7 +222,7 @@ export function AppHeader({
               initial={{ opacity: 0, x: "100%" }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: "100%" }}
-              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ type: "spring", stiffness: 350, damping: 25 }}
               className="fixed inset-y-0 right-0 z-50 flex w-[min(88vw,22rem)] flex-col border-l border-finora-gold/20 bg-white/95 p-5 shadow-2xl backdrop-blur-xl transform-gpu dark:bg-finora-surface/95 md:hidden"
             >
               <div className="mb-5 flex items-center justify-between border-b border-finora-gold/15 pb-4">

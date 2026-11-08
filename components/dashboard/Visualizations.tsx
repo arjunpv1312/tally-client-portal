@@ -13,6 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { SpotlightCard } from "@/components/ui/SpotlightCard";
 
 export type VoucherAnalyticsRow = {
   date?: string | null;
@@ -143,7 +144,7 @@ export function FinancialVisualizations({
 
   return (
     <div className="grid gap-5 xl:grid-cols-2">
-      <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm dark:border-finora-gold/20 dark:bg-finora-surface/70 sm:p-6">
+      <SpotlightCard className="p-4 shadow-sm sm:p-6">
         <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
           Voucher Distribution
         </h2>
@@ -176,9 +177,9 @@ export function FinancialVisualizations({
             </PieChart>
           </ResponsiveContainer>
         </div>
-      </section>
+      </SpotlightCard>
 
-      <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm dark:border-finora-gold/20 dark:bg-finora-surface/70 sm:p-6">
+      <SpotlightCard className="p-4 shadow-sm sm:p-6">
         <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
           Monthly Revenue &amp; Expenses
         </h2>
@@ -196,9 +197,9 @@ export function FinancialVisualizations({
             </BarChart>
           </ResponsiveContainer>
         </div>
-      </section>
+      </SpotlightCard>
 
-      <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 shadow-sm dark:border-finora-gold/20 dark:bg-finora-surface/70 sm:p-6 xl:col-span-2">
+      <SpotlightCard className="p-4 shadow-sm sm:p-6 xl:col-span-2">
         <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-[#F8F4E8]">
           Top Customers &amp; Vendors
         </h2>
@@ -231,7 +232,7 @@ export function FinancialVisualizations({
             Party details will appear when vouchers include customer or vendor names.
           </p>
         )}
-      </section>
+      </SpotlightCard>
     </div>
   );
 }

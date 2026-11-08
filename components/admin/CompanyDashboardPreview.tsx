@@ -262,7 +262,7 @@ export function CompanyDashboardPreview({
               ].map(([label, value]) => (
                 <article key={String(label)} className="rounded-xl border border-white/10 bg-white/5 p-4">
                   <p className="text-sm text-slate-400">{label}</p>
-                  <p className="mt-2 text-xl font-semibold text-amber-200">
+                  <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-amber-200">
                     {currency(Number(value))}
                   </p>
                 </article>
@@ -303,7 +303,9 @@ export function CompanyDashboardPreview({
                         <td className="px-4 py-3 capitalize">{voucher.voucher_type}</td>
                         <td className="px-4 py-3">{voucher.party_name ?? "—"}</td>
                         <td className="px-4 py-3 text-right">
-                          {currency(amount(voucher.total_amount ?? voucher.amount))}
+                          <span className="font-mono tabular-nums">
+                            {currency(amount(voucher.total_amount ?? voucher.amount))}
+                          </span>
                         </td>
                       </tr>
                     ))}

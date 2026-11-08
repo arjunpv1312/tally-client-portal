@@ -601,6 +601,13 @@ export default function AdminPage() {
           title="Admin Dashboard"
           subtitle="Manage client companies, user access, and team assignments"
           roleLabel="Administrator"
+          commandCompanies={companies}
+          onCommandCompanySelect={(company) => {
+            const selectedCompany = companies.find(
+              (item) => item.id === company.id,
+            );
+            if (selectedCompany) setPreviewCompany(selectedCompany);
+          }}
           activeNavItem={activeTab}
           navItems={[
             { label: "companies", onSelect: () => setActiveTab("companies") },

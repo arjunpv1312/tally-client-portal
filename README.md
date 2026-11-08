@@ -31,18 +31,22 @@ The web application includes administrator-managed company and account directori
 
 ```mermaid
 sequenceDiagram
-    actor Tally as TallyPrime Desktop
-    participant Worker as Python Sync Worker
-    participant DB as Supabase PostgreSQL
-    participant App as Next.js App Router
+    autonumber
+    participant Tally as TallyPrime Desktop (Port 9000)
+    participant Worker as Python Sync Worker (tally_sync.py)
+    participant DB as Supabase PostgreSQL (RLS)
+    participant App as Next.js Web App
 
-    Tally->>Worker: Day Book XML over local HTTP
-    Worker->>DB: HTTPS REST batch upserts (250 rows)
-    Note over Worker,DB: Worker uses a server-side service-role key
-    App->>DB: Authenticated reads scoped by RLS
-    DB-->>App: Vouchers and financial summaries
-    DB-->>App: Postgres Changes notifications
-    App->>DB: Refresh data after a change
+    Worker->>Tally: Request Day Book XML (HTTP POST)
+    Tally-->>Worker: Voucher and ledger entries
+    Worker->>Worker: Parse XML, classify entries, calculate summaries
+    Worker->>DB: Batch upsert vouchers and summaries (up to 250 rows)
+    Note over Worker,DB: Worker authenticates with a server-only service-role key
+    DB-->>Worker: REST response; voucher key company_id + tally_voucher_id, summary key company_id + period_start
+    App->>DB: Authenticated company-scoped queries
+    DB-->>App: RLS-authorized vouchers and financial summaries
+    DB-->>App: Realtime Postgres Changes notifications
+    App->>DB: Refresh affected dashboard data
 ```
 
 The Tally listener should remain on a trusted local network and must not be
@@ -283,30 +287,85 @@ tally-client-portal/
 ├── .env.example                      # Safe template for local Tally sync configuration
 ├── .github/workflows/ci.yml          # TypeScript, lint, sync tests, and build checks
 ├── app/
-│   ├── admin/page.tsx                 # Company, account, and assignment management
-│   ├── api/admin/create-user/route.ts # Server-side account provisioning
-│   ├── dashboard/page.tsx             # Client financial dashboard (live Supabase data)
-│   ├── employee/page.tsx              # Employee's assigned companies and entry status
-│   ├── login/page.tsx                 # Login and role selection
-│   ├── error.tsx                      # Animated route error boundary
-│   ├── loading.tsx                    # Animated loading skeleton
-│   ├── not-found.tsx                  # Executive 404 page
+│   ├── admin/                         # Admin route and loading state
+│   ├── api/admin/                     # Server-side create, delete, and revoke APIs
+│   ├── dashboard/                     # Client financial dashboard and GST report
+│   ├── employee/                      # Employee workspace and task logging UI
+│   ├── login/                         # Login and role selection
+│   ├── error.tsx                      # Route error boundary
+│   ├── loading.tsx                    # Root loading skeleton
+│   ├── template.tsx                   # Route transition wrapper
 │   ├── globals.css                    # Global styles and theme variables
-│   └── layout.tsx                     # Root layout and app providers
-├── components/                        # Shared auth, charts, navigation, and UI
-├── lib/                               # Supabase client, theme, and auth helpers
-├── proxy.ts                           # SSR session refresh and role-gated routes
-├── public/                            # Static app assets (favicon only)
-├── scripts/                           # Windows sync scheduling
+│   └── layout.tsx                     # Root layout, providers, and idle timer
+├── components/
+│   ├── admin/                         # Admin skeleton and company preview
+│   ├── auth/                          # Idle timer and employee activity tracker
+│   ├── dashboard/                     # Date filters, skeletons, and task modal
+│   ├── navbar/                        # Assigned-company selector
+│   └── ui/                            # Shared skeleton and export controls
+├── lib/                               # Supabase clients, auth, theme, and work logs
+├── proxy.ts                           # Route protection and session handling
+├── public/logo.png                    # FINORA brand asset
+├── scripts/schedule_sync.ps1          # Windows Task Scheduler helper
 ├── supabase/
 │   └── schema.sql                     # Tables, relationships, and RLS policies
 ├── run_sync.bat                       # Windows one-click sync launcher
 ├── tally_sync.py                      # TallyPrime to Supabase sync worker
 ├── tests/test_tally_sync.py            # XML parsing and summary tests
-├── types/                             # Shared TypeScript types
+├── types/index.ts                     # Shared TypeScript types
 ├── APP_SPEC.md                        # Product requirements and design rules
 └── README.md
 ```
+
+## Pre-launch verification checklist
+
+Use this checklist for each deployment; items that require provider access must
+be verified in the target Supabase or Vercel project.
+
+- [ ] Apply [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL
+      Editor. Confirm `employee_work_logs` exists.
+- [ ] Confirm RLS is enabled for the tables defined in the schema:
+      `profiles`, `companies`, `company_employees`, `employee_work_logs`,
+      `vouchers`, and `financial_summaries`. This repository schema does not
+      define `audit_logs`, `ledgers`, triggers, or `v_company_voucher_totals`.
+- [ ] Keep `SUPABASE_SERVICE_ROLE_KEY` only in the sync machine's ignored
+      `.env` and server-side deployment settings. Never expose it with a
+      `NEXT_PUBLIC_` prefix.
+- [ ] Confirm `.env` and `.env.local` are ignored by Git and that no secrets
+      have been committed.
+- [ ] Start TallyPrime's XML/HTTP listener on port `9000` on the sync machine.
+      Do not expose the listener to the public internet.
+- [ ] Configure the local sync `.env`, then run `py -3 .\tally_sync.py` or
+      double-click [`run_sync.bat`](./run_sync.bat). Verify its `[INFO]`,
+      `[SUCCESS]`, or `[ERROR]` output.
+- [ ] In `/admin`, test the project-config and company-ID copy actions and
+      open a company dashboard preview.
+- [ ] In `/dashboard`, test date presets and exports; open `/dashboard/gst`
+      and verify the CGST, SGST, and IGST totals against known source data.
+      GST is not calculated by 5%, 12%, 18%, or 28% tax slabs.
+- [ ] Keep a client dashboard open during a sync and confirm updates arrive.
+      This requires vouchers and summaries to be enabled in the Supabase
+      Realtime publication.
+- [ ] Configure `NEXT_PUBLIC_SUPABASE_URL`,
+      `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and server-only
+      `SUPABASE_SERVICE_ROLE_KEY` for the relevant Vercel environments, then
+      verify the deployment.
+- [ ] Confirm the GitHub Actions workflow passes on `main`. CI runs
+      `npx tsc --noEmit`, `npm run lint`, Python `unittest` discovery, and
+      `npm run build`.
+
+## Troubleshooting FAQ
+
+| Symptom | Likely cause | What to check |
+| --- | --- | --- |
+| Tally connection refused on port `9000` | TallyPrime is closed, its XML/HTTP listener is disabled, or the sync is running on another computer | Open the target company in TallyPrime, enable its listener, and test `http://localhost:9000` from the sync computer. |
+| Sync reports missing configuration | `.env` is absent, misspelled, or missing a required value | Create `.env` beside `tally_sync.py` from [`.env.example`](./.env.example). Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TALLY_COMPANY_NAME`, and `TALLY_COMPANY_ID` (or legacy `TARGET_COMPANY_ID`). |
+| Sync receives an authorization or permission error | The URL/key pair is wrong, the key is not the service-role key, or the request targets the wrong project | Verify the project URL and server-only key in the local `.env`. Never put the service-role key in the browser or a `NEXT_PUBLIC_` variable. |
+| Sync succeeds but the dashboard is empty | The sync company UUID does not match the user's company, no records were returned for the date range, or the account lacks the correct role/assignment | Compare the configured company UUID with the Admin Companies list and the signed-in user's company assignment; inspect the sync's voucher and summary counts. |
+| Dashboard does not refresh after sync | Realtime is not enabled for one or both reporting tables, or the subscription cannot connect | Ensure `vouchers` and `financial_summaries` are in the Supabase Realtime publication, then check the dashboard's live-update warning. |
+| Employee activity or task logging is unavailable | The latest database schema has not been applied, or employee assignment policies do not permit the operation | Apply the current [`supabase/schema.sql`](./supabase/schema.sql) and verify the employee's company assignment and RLS policies. |
+| GST totals differ from a statutory report | The report sums imported CGST/SGST/IGST values and separates sales from purchases; it does not bucket by statutory tax-rate slabs | Validate Tally's voucher/tax ledger mapping and compare with company books before filing. |
+| Windows launcher exits before syncing | Python 3.10+ is missing, `.env.example` is unavailable, or `.env` needs configuration | Read the launcher's displayed error, install Python 3.10+, then configure and save `.env` before running it again. |
 
 ## License
 

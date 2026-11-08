@@ -7,11 +7,11 @@ export function DashboardContentSkeleton() {
         {Array.from({ length: 4 }, (_, index) => (
           <section
             key={index}
-            className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]"
+            className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-white/[0.08] dark:bg-[#111722]"
           >
-            <Skeleton className="h-4 w-24" />
-            <Skeleton className="mt-4 h-8 w-36" />
-            <Skeleton className="mt-3 h-3 w-20" />
+            <Skeleton className="h-4 w-24 bg-slate-200 dark:bg-white/5" />
+            <Skeleton className="mt-4 h-8 w-36 bg-slate-200 dark:bg-white/5" />
+            <Skeleton className="mt-3 h-3 w-20 bg-slate-200 dark:bg-white/5" />
           </section>
         ))}
       </div>
@@ -20,14 +20,14 @@ export function DashboardContentSkeleton() {
         {[0, 1].map((chart) => (
           <section
             key={chart}
-            className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-[#334155] dark:bg-[#1E293B]"
+            className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm dark:border-white/[0.08] dark:bg-[#111722]"
           >
             <Skeleton className="h-5 w-48" />
             <div className="mt-6 flex h-56 items-end gap-3">
               {[44, 66, 52, 82, 60, 94, 70].map((height, index) => (
                 <Skeleton
                   key={index}
-                  className="flex-1 rounded-t-md rounded-b-none"
+                  className="flex-1 rounded-t-md rounded-b-none bg-slate-200 dark:bg-white/5"
                   style={{ height: `${height}%` }}
                 />
               ))}
@@ -36,18 +36,18 @@ export function DashboardContentSkeleton() {
         ))}
       </div>
 
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
-        <div className="border-b border-slate-200 p-5 dark:border-[#334155]">
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="mt-2 h-4 w-56" />
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-white/[0.08] dark:bg-[#111722]">
+        <div className="border-b border-slate-200 p-5 dark:border-white/[0.08]">
+          <Skeleton className="h-5 w-40 bg-slate-200 dark:bg-white/5" />
+          <Skeleton className="mt-2 h-4 w-56 bg-slate-200 dark:bg-white/5" />
         </div>
-        <div className="space-y-4 p-5">
+        <div className="space-y-3 p-5">
           {Array.from({ length: 5 }, (_, index) => (
-            <div key={index} className="flex items-center gap-4">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-4 flex-1" />
-              <Skeleton className="h-4 w-24" />
+            <div key={index} className="flex items-center gap-4 rounded-lg border border-slate-100 p-3 dark:border-white/[0.04]">
+              <Skeleton className="h-4 w-24 bg-slate-200 dark:bg-white/5" />
+              <Skeleton className="h-4 w-20 bg-slate-200 dark:bg-white/5" />
+              <Skeleton className="h-4 flex-1 bg-slate-200 dark:bg-white/5" />
+              <Skeleton className="h-4 w-24 bg-slate-200 dark:bg-white/5" />
             </div>
           ))}
         </div>
