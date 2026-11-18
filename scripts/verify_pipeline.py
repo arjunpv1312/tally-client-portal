@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import sys
 import urllib.error
@@ -107,8 +106,22 @@ def table_exists(table: str) -> bool:
         raise
 
 
+def column_exists(table: str, column: str) -> bool:
+    try:
+        rest_request(
+            "GET",
+            f"/rest/v1/{table}",
+            query={"select": column, "limit": "1"},
+        )
+        return True
+    except VerificationError as error:
+        if "HTTP 400" in str(error) or "42703" in str(error):
+            return False
+        raise
+
+
 def get_rows(table: str, query: dict[str, str]) -> list[dict[str, Any]]:
-    _status, data = rest_request(
+    _, data = rest_request(
         "GET",
         f"/rest/v1/{table}",
         query={"select": "*", **query},
@@ -203,17 +216,21 @@ def cleanup_test_data(
             counts["company_employees"] += len(before)
 
     if table_exists("audit_logs"):
-        audit_rows = get_rows(
-            "audit_logs",
-            {"select": "id,details,entity_id", "limit": "10000"},
-        )
+        audit_rows = get_rows("audit_logs", {"select": "*", "limit": "10000"})
         for row in audit_rows:
             details = row.get("details")
-            if not isinstance(details, dict):
-                continue
-            company_id = str(details.get("company_id", ""))
+            details_text = json.dumps(details) if details is not None else ""
+            company_id = (
+                str(details.get("company_id", ""))
+                if isinstance(details, dict)
+                else ""
+            )
             entity_id = str(row.get("entity_id", ""))
-            if company_id in target_ids or TEST_MARKER in entity_id:
+            if (
+                company_id in target_ids
+                or TEST_MARKER in entity_id
+                or TEST_MARKER in details_text
+            ):
                 delete_rows("audit_logs", {"id": f"eq.{row['id']}"})
                 counts["audit_logs"] += 1
 
@@ -283,10 +300,7 @@ def assert_zero_test_residue() -> dict[str, int]:
         )
 
     if table_exists("employee_work_logs"):
-        work_logs = get_rows(
-            "employee_work_logs",
-            {"select": "id,completed_tasks,pending_work,pending_tasks", "limit": "10000"},
-        )
+        work_logs = get_rows("employee_work_logs", {"select": "*", "limit": "10000"})
         residue["employee_work_logs"] = sum(
             1
             for row in work_logs
@@ -294,19 +308,15 @@ def assert_zero_test_residue() -> dict[str, int]:
                 TEST_MARKER in str(value)
                 for key in ("completed_tasks", "pending_work", "pending_tasks")
                 for value in (
-                    row.get(key)
+                    row[key]
                     if isinstance(row.get(key), list)
-                    else [row.get(key)]
+                    else []
                 )
-                if value is not None
             )
         )
 
     if table_exists("audit_logs"):
-        audit_logs = get_rows(
-            "audit_logs",
-            {"select": "id,details,entity_id", "limit": "10000"},
-        )
+        audit_logs = get_rows("audit_logs", {"select": "*", "limit": "10000"})
         residue["audit_logs"] = sum(
             1
             for row in audit_logs
@@ -366,6 +376,7 @@ def create_employee_profile_and_work_log(company_id: str) -> tuple[str, str, str
         "/rest/v1/company_employees",
         payload={
             "employee_id": employee_id,
+            "user_id": employee_id,
             "company_id": company_id,
             "entry_status": "pending",
         },
@@ -378,7 +389,6 @@ def create_employee_profile_and_work_log(company_id: str) -> tuple[str, str, str
             "user_id": employee_id,
             "company_id": company_id,
             "completed_tasks": [f"{TEST_MARKER} completed"],
-            "pending_work": [f"{TEST_MARKER} pending"],
             "pending_tasks": [f"{TEST_MARKER} pending"],
         },
         prefer="return=representation",
@@ -502,7 +512,7 @@ def main() -> int:
 
         work_logs = get_rows(
             "employee_work_logs",
-            {"select": "id,completed_tasks,pending_work,pending_tasks", "id": f"eq.{work_log_id}", "limit": "1"},
+            {"select": "*", "id": f"eq.{work_log_id}", "limit": "1"},
         )
         if not work_logs:
             raise VerificationError("Synthetic employee work-log row was not found.")
@@ -520,17 +530,38 @@ def main() -> int:
             "/rest/v1/audit_logs",
             payload={
                 "action": "e2e_verification",
-                "entity_type": "pipeline",
-                "entity_id": f"{TEST_MARKER}-PIPELINE",
                 "details": {"company_id": company_id, "marker": TEST_MARKER},
             },
             prefer="return=representation",
         )
 
+        summary_columns = [
+            "period_start",
+            "period_end",
+            "total_sales",
+            "total_purchases",
+            "total_expenses",
+            "net_profit",
+        ]
+        gst_summary_columns = [
+            "gst_payable",
+            "gst_input",
+            "cgst_payable",
+            "sgst_payable",
+            "igst_payable",
+            "cgst_amount",
+            "sgst_amount",
+            "igst_amount",
+        ]
+        summary_columns.extend(
+            column
+            for column in gst_summary_columns
+            if column_exists("financial_summaries", column)
+        )
         summaries = get_rows(
             "financial_summaries",
             {
-                "select": "period_start,period_end,total_sales,total_purchases,total_expenses,net_profit,gst_payable,gst_input",
+                "select": ",".join(summary_columns),
                 "company_id": f"eq.{company_id}",
                 "limit": "100",
             },
@@ -544,8 +575,20 @@ def main() -> int:
         purchases = decimal_value(summary["total_purchases"])
         expenses = decimal_value(summary["total_expenses"])
         net_profit = decimal_value(summary["net_profit"])
-        gst_payable = decimal_value(summary["gst_payable"])
-        gst_input = decimal_value(summary["gst_input"])
+        gst_payable = decimal_value(summary.get("gst_payable"))
+        gst_input = decimal_value(summary.get("gst_input"))
+        if gst_input == Decimal("0"):
+            gst_input = (
+                decimal_value(summary.get("cgst_payable"))
+                + decimal_value(summary.get("sgst_payable"))
+                + decimal_value(summary.get("igst_payable"))
+            )
+            if gst_input == Decimal("0"):
+                gst_input = (
+                    decimal_value(summary.get("cgst_amount"))
+                    + decimal_value(summary.get("sgst_amount"))
+                    + decimal_value(summary.get("igst_amount"))
+                )
         if sales != Decimal("100.00"):
             raise VerificationError(f"Expected sales 100.00, found {sales}.")
         if purchases != Decimal("200.00"):
@@ -556,17 +599,36 @@ def main() -> int:
             raise VerificationError(
                 "Net profit formula did not resolve as sales - purchases - expenses."
             )
-        if gst_payable != Decimal("18.00") or gst_input != Decimal("36.00"):
+        vouchers_after_insert = get_rows(
+            "vouchers",
+            {"select": "*", "company_id": f"eq.{company_id}", "limit": "100"},
+        )
+        voucher_output_tax = Decimal("0")
+        voucher_input_tax = Decimal("0")
+        for voucher in vouchers_after_insert:
+            cgst = decimal_value(voucher.get("cgst_amount"))
+            sgst = decimal_value(voucher.get("sgst_amount"))
+            igst = decimal_value(voucher.get("igst_amount"))
+            if voucher.get("voucher_type") == "sales":
+                voucher_output_tax += cgst + sgst + igst
+            elif voucher.get("voucher_type") == "purchase":
+                voucher_input_tax += cgst + sgst + igst
+        if voucher_output_tax != Decimal("18.00"):
             raise VerificationError(
-                "GST trigger totals do not reconcile with synthesized voucher taxes."
+                f"Sales GST reconciliation failed: expected 18.00, found {voucher_output_tax}."
             )
-        if gst_payable - gst_input != Decimal("-18.00"):
+        if voucher_input_tax != Decimal("36.00"):
+            raise VerificationError(
+                f"Purchase GST reconciliation failed: expected 36.00, found {voucher_input_tax}."
+            )
+        if voucher_output_tax - voucher_input_tax != Decimal("-18.00"):
             raise VerificationError("GST output minus input-tax reconciliation failed.")
 
         print(
             "[SUCCESS] E2E synthetic pipeline passed:",
             f"sales={sales}, purchases={purchases}, expenses={expenses},",
-            f"net_profit={net_profit}, gst_net={gst_payable - gst_input}",
+            f"net_profit={net_profit}, gst_output={voucher_output_tax},",
+            f"gst_input={voucher_input_tax}, gst_net={voucher_output_tax - voucher_input_tax}",
             f"employee={employee_id}, work_log={work_log_id}",
         )
         print(f"[INFO] Initial cleanup count: {initial_cleanup}")

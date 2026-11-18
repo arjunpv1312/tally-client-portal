@@ -27,7 +27,6 @@ from tally_sync import (
     parse_daybook_xml,
     run_daemon,
     summarize_vouchers,
-    validate_configuration,
 )
 
 

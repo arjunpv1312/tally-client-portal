@@ -46,7 +46,7 @@ export async function saveEmployeeTasks(
   pendingWork: string[],
 ) {
   const supabase = getBrowserSupabase();
-  let result = await supabase
+  const result = await supabase
     .from("employee_work_logs")
     .update({
       completed_tasks: completedTasks,

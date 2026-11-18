@@ -47,6 +47,7 @@ const chartTooltipStyle = {
   border: "1px solid var(--chart-tooltip-border, #e2e8f0)",
   background: "var(--chart-tooltip-bg, #fff)",
   color: "var(--foreground, #0f172a)",
+  fontFamily: "var(--font-geist-mono)",
 };
 
 function numericValue(value: number | string | null | undefined): number {

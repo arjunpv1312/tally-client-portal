@@ -58,6 +58,7 @@ type SummaryRow = {
 type VoucherRow = {
   id: string;
   date: string | null;
+  updated_at?: string | null;
   voucher_number: string | null;
   voucher_type: string;
   party_name: string | null;
@@ -150,13 +151,14 @@ async function fetchDashboardData(
           voucher_date?: string | null;
           narration?: string | null;
           voucher_number?: string | null;
+          updated_at?: string | null;
         }[]
       >();
   };
   const voucherVariants = [
     {
       columns:
-        "id, total_amount, amount, sales_amount, purchase_amount, expense_amount, party_name, voucher_type, date, voucher_date, voucher_number, narration",
+        "id, total_amount, amount, sales_amount, purchase_amount, expense_amount, party_name, voucher_type, date, voucher_date, voucher_number, narration, updated_at",
       orderColumn: "date",
       dateColumn: "voucher_date",
     },
@@ -197,6 +199,7 @@ async function fetchDashboardData(
         voucherRows = (result.data ?? []).map((voucher) => ({
           id: voucher.id,
           date: voucher.date ?? voucher.voucher_date ?? null,
+          updated_at: voucher.updated_at ?? null,
           voucher_number: voucher.voucher_number ?? null,
           voucher_type: voucher.voucher_type ?? "unknown",
           party_name: voucher.party_name ?? null,
@@ -461,8 +464,16 @@ export default function DashboardPage() {
   );
   const latest = chartData.at(-1);
   const latestSummary = dashboard?.summaries.at(-1);
+  const latestVoucherTimestamp = dashboard?.vouchers
+    .map((voucher) => voucher.updated_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
   const lastSyncedAt =
-    latestSummary?.last_synced_at ?? latestSummary?.updated_at ?? null;
+    [latestSummary?.last_synced_at, latestSummary?.updated_at, latestVoucherTimestamp]
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null;
   const metricCards = useMemo(() => {
     const latestChartData = chartData.at(-1);
     if (!latestChartData) return [];
