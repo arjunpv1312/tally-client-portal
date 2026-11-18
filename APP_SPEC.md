@@ -9,7 +9,11 @@
 - Recharts (for visual financial graphs)
 - Supabase (@supabase/supabase-js) for Auth & Database
 
+
+
+
 ## Core Design Rules
+
 
 1. Light & Dark Themes ONLY (2-way toggle):
    - Light: White (#FFFFFF) background, Soft Blue (#2563EB) accents, Slate text.

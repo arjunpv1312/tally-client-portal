@@ -7,6 +7,8 @@ regulation. The organization operating a deployment is responsible for
 determining its obligations and configuring, testing, and documenting its
 controls.
 
+
+
 ## Data handled
 
 Depending on configuration, the application and sync worker process:
@@ -18,6 +20,7 @@ Depending on configuration, the application and sync worker process:
   values, tax amounts, and raw ledger-entry details.
 - Monthly financial summaries and authentication/session data managed by
   Supabase.
+  
 
 The schema stores raw ledger entries in `vouchers.raw_ledger_entries`. Avoid
 sending data that is not needed for reporting, and use synthetic data for
