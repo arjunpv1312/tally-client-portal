@@ -47,17 +47,7 @@ const chartTooltipStyle = {
   border: "1px solid var(--chart-tooltip-border, #e2e8f0)",
   background: "var(--chart-tooltip-bg, #fff)",
   color: "var(--foreground, #0f172a)",
-  fontFamily: "var(--font-geist-mono), monospace",
-  fontVariantNumeric: "tabular-nums",
 };
-
-function formatInr(value: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(value) ? value : 0);
-}
 
 function numericValue(value: number | string | null | undefined): number {
   const parsed = Number(value ?? 0);
@@ -174,7 +164,13 @@ export function FinancialVisualizations({
                 ))}
               </Pie>
               <Tooltip
-                formatter={(value) => formatInr(Number(value))}
+                formatter={(value) =>
+                  new Intl.NumberFormat("en-IN", {
+                    style: "currency",
+                    currency: "INR",
+                    maximumFractionDigits: 0,
+                  }).format(Number(value))
+                }
                 contentStyle={chartTooltipStyle}
               />
               <Legend />
@@ -193,10 +189,7 @@ export function FinancialVisualizations({
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="period" tick={{ fill: "var(--foreground)", fontSize: 11 }} />
               <YAxis tick={{ fill: "var(--foreground)", fontSize: 11 }} />
-              <Tooltip
-                formatter={(value) => formatInr(Number(value))}
-                contentStyle={chartTooltipStyle}
-              />
+              <Tooltip contentStyle={chartTooltipStyle} />
               <Legend />
               <Bar dataKey="sales" name="Sales" fill="#E5C365" radius={[4, 4, 0, 0]} />
               <Bar dataKey="purchases" name="Purchases" fill="#10B981" radius={[4, 4, 0, 0]} />
@@ -229,10 +222,7 @@ export function FinancialVisualizations({
                   width={120}
                   tick={{ fill: "var(--foreground)", fontSize: 11 }}
                 />
-                <Tooltip
-                  formatter={(value) => formatInr(Number(value))}
-                  contentStyle={chartTooltipStyle}
-                />
+                <Tooltip contentStyle={chartTooltipStyle} />
                 <Bar dataKey="amount" name="Voucher Amount" fill="#E5C365" radius={[0, 5, 5, 0]} />
               </BarChart>
             </ResponsiveContainer>

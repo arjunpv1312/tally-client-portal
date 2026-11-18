@@ -47,16 +47,3 @@ next-env.d.ts
 __pycache__/
 *.py[cod]
 .venv/
-.pytest_cache/
-
-# tally sync state
-.sync_state.json
-
-# os & temp artifacts
-Thumbs.db
-Desktop.ini
-*.tmp
-*.bak
-*.orig
-*.log
-*.swp

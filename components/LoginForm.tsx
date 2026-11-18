@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Lock, LogIn, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -34,14 +34,6 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [idleNotice, setIdleNotice] = useState(false);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("reason") === "idle_timeout") {
-      setIdleNotice(true);
-    }
-  }, []);
 
   function reportError(message: string) {
     setError(message);
@@ -121,15 +113,6 @@ export function LoginForm() {
       </div>
 
       <RoleSelector value={roleTab} onChange={setRoleTab} />
-
-      {idleNotice ? (
-        <p
-          role="status"
-          className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 dark:border-[#E5C365]/35 dark:bg-[#E5C365]/10 dark:text-[#F5E4AA]"
-        >
-          Your session expired after 30 minutes of inactivity. Sign in again to continue.
-        </p>
-      ) : null}
 
       <div className="space-y-4">
         <label className="block space-y-1.5">

@@ -45,8 +45,7 @@ export async function saveEmployeeTasks(
   completedTasks: string[],
   pendingWork: string[],
 ) {
-  const supabase = getBrowserSupabase();
-  let { data, error } = await supabase
+  const { data, error } = await getBrowserSupabase()
     .from("employee_work_logs")
     .update({
       completed_tasks: completedTasks,
@@ -57,26 +56,6 @@ export async function saveEmployeeTasks(
     .select("id")
     .returns<{ id: string }[]>()
     .maybeSingle();
-
-  if (
-    error &&
-    /pending_work/i.test(error.message) &&
-    /(column|schema cache|does not exist|could not find)/i.test(error.message)
-  ) {
-    const fallback = await supabase
-      .from("employee_work_logs")
-      .update({
-        completed_tasks: completedTasks,
-        pending_tasks: pendingWork,
-      })
-      .eq("id", workLogId)
-      .is("logout_time", null)
-      .select("id")
-      .returns<{ id: string }[]>()
-      .maybeSingle();
-    data = fallback.data;
-    error = fallback.error;
-  }
 
   if (error) throw new Error(error.message);
   if (!data) throw new Error("The active work log was not found or is already closed.");

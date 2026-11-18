@@ -35,46 +35,21 @@ export function TaskChecklistModal({
 
     void (async () => {
       try {
-        const supabase = getBrowserSupabase();
-        let { data, error: loadError } = await supabase
+        const { data, error: loadError } = await getBrowserSupabase()
           .from("employee_work_logs")
           .select("completed_tasks, pending_work")
           .eq("id", workLogId)
           .returns<{
             completed_tasks: string[] | null;
-            pending_work?: string[] | null;
-            pending_tasks?: string[] | null;
+            pending_work: string[] | null;
           }[]>()
           .maybeSingle();
-
-        if (
-          loadError &&
-          /pending_work/i.test(loadError.message) &&
-          /(column|schema cache|does not exist|could not find)/i.test(
-            loadError.message,
-          )
-        ) {
-          const fallback = await supabase
-            .from("employee_work_logs")
-            .select("completed_tasks, pending_tasks")
-            .eq("id", workLogId)
-            .returns<{
-              completed_tasks: string[] | null;
-              pending_tasks: string[] | null;
-            }[]>()
-            .maybeSingle();
-          data = fallback.data;
-          loadError = fallback.error;
-        }
-
         if (cancelled) return;
         if (loadError) {
           setError(loadError.message);
         } else if (data) {
           setCompletedTasks((data.completed_tasks ?? []).join("\n"));
-          setPendingWork(
-            (data.pending_work ?? data.pending_tasks ?? []).join("\n"),
-          );
+          setPendingWork((data.pending_work ?? []).join("\n"));
         }
       } catch (loadError) {
         if (!cancelled) {

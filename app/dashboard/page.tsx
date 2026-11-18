@@ -18,7 +18,6 @@ import {
   type MonthlyFinancialData,
 } from "@/components/dashboard/Visualizations";
 import { MetricCard } from "@/components/dashboard/MetricCard";
-import { SyncStatusPill } from "@/components/dashboard/SyncStatusPill";
 import { VoucherTable } from "@/components/dashboard/VoucherTable";
 import { EmptyStateGraphic } from "@/components/ui/EmptyStateGraphic";
 import {
@@ -68,7 +67,6 @@ type VoucherRow = {
   purchase_amount?: number | string | null;
   expense_amount?: number | string | null;
   voucher_date?: string | null;
-  updated_at?: string | null;
 };
 
 type DashboardData = {
@@ -151,17 +149,10 @@ async function fetchDashboardData(
           voucher_date?: string | null;
           narration?: string | null;
           voucher_number?: string | null;
-          updated_at?: string | null;
         }[]
       >();
   };
   const voucherVariants = [
-    {
-      columns:
-        "id, total_amount, amount, sales_amount, purchase_amount, expense_amount, party_name, voucher_type, date, voucher_date, voucher_number, narration, updated_at",
-      orderColumn: "date",
-      dateColumn: "voucher_date",
-    },
     {
       columns:
         "id, total_amount, amount, sales_amount, purchase_amount, expense_amount, party_name, voucher_type, date, voucher_date, voucher_number, narration",
@@ -214,7 +205,6 @@ async function fetchDashboardData(
           sales_amount: voucher.sales_amount ?? null,
           purchase_amount: voucher.purchase_amount ?? null,
           expense_amount: voucher.expense_amount ?? null,
-          updated_at: voucher.updated_at ?? null,
         }));
         voucherWarning = null;
         break;
@@ -469,20 +459,9 @@ export default function DashboardPage() {
     [dashboard?.summaries, dashboard?.vouchers],
   );
   const latest = chartData.at(-1);
-  const lastSyncedAt = useMemo(() => {
-    const candidates = [
-      ...(dashboard?.summaries ?? []).map(
-        (summary) => summary.updated_at ?? summary.last_synced_at ?? null,
-      ),
-      ...(dashboard?.vouchers ?? []).map((voucher) => voucher.updated_at ?? null),
-    ]
-      .filter((value): value is string => Boolean(value))
-      .map((value) => ({ value, time: Date.parse(value) }))
-      .filter((item) => !Number.isNaN(item.time));
-    if (candidates.length === 0) return null;
-    candidates.sort((left, right) => right.time - left.time);
-    return candidates[0].value;
-  }, [dashboard?.summaries, dashboard?.vouchers]);
+  const latestSummary = dashboard?.summaries.at(-1);
+  const lastSyncedAt =
+    latestSummary?.last_synced_at ?? latestSummary?.updated_at ?? null;
   const metricCards = useMemo(() => {
     const latestChartData = chartData.at(-1);
     if (!latestChartData) return [];
@@ -615,7 +594,6 @@ export default function DashboardPage() {
           identityName={dashboard?.companyName ?? dashboard?.profileName ?? undefined}
           identityLabel="Client company"
           roleLabel="Client"
-          contextControl={<SyncStatusPill timestamp={lastSyncedAt} />}
           navItems={[
             { label: "Overview", href: "/dashboard" },
             { label: "GST Reports", href: "/dashboard/gst" },
@@ -642,7 +620,7 @@ export default function DashboardPage() {
                   setLoading(true);
                   setReloadVersion((version) => version + 1);
                 }}
-                className="mt-4 rounded-xl bg-[#E5C365] px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm transition hover:bg-[#F5E4AA]"
+                className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 dark:bg-[#60A5FA] dark:text-slate-950"
               >
                 Retry
               </button>
@@ -650,14 +628,9 @@ export default function DashboardPage() {
           ) : (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-                <div className="flex flex-wrap items-center gap-3">
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    Showing {dateRange.startDate} through {dateRange.endDate}
-                  </p>
-                  <div className="sm:hidden">
-                    <SyncStatusPill timestamp={lastSyncedAt} />
-                  </div>
-                </div>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Showing {dateRange.startDate} through {dateRange.endDate}
+                </p>
                 <ExportButtons
                   reportTitle="Recent vouchers"
                   filename="finora-vouchers"
@@ -677,6 +650,15 @@ export default function DashboardPage() {
                 </div>
               ) : null}
 
+              {lastSyncedAt ? (
+                <p className="text-right text-xs text-slate-500 dark:text-slate-400">
+                  Last synced{" "}
+                  {new Intl.DateTimeFormat("en-IN", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(lastSyncedAt))}
+                </p>
+              ) : null}
               {dashboard?.summaryWarning ? (
                 <p
                   role="status"
@@ -728,12 +710,12 @@ export default function DashboardPage() {
                 </>
               ) : null}
 
-              {dashboard?.vouchers.length || chartData.length > 0 ? (
-                <VoucherTable vouchers={dashboard?.vouchers ?? []} />
+              {dashboard?.vouchers.length ? (
+                <VoucherTable vouchers={dashboard.vouchers} />
               ) : null}
 
               {chartData.length === 0 && !dashboard?.vouchers.length ? (
-                <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-white/[0.08] dark:bg-[#111722]">
+                <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
                   <EmptyStateGraphic
                     title="No Tally Sync Data Available Yet"
                     description="Your accountant has not run the Tally sync script for this company."
@@ -742,7 +724,7 @@ export default function DashboardPage() {
               ) : null}
 
               {chartData.length === 0 && dashboard?.vouchers.length ? (
-                <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-white/[0.08] dark:bg-[#111722]">
+                <section className="rounded-xl border border-slate-200 bg-[#F8FAFC] shadow-sm dark:border-[#334155] dark:bg-[#1E293B]">
                   <EmptyStateGraphic
                     title="Monthly summaries are not available"
                     description="Voucher data is available, but monthly metrics have not been synchronized yet."
