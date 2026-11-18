@@ -26,6 +26,7 @@ import {
   type DateRange,
 } from "@/components/dashboard/DateFilter";
 import { ExportButtons } from "@/components/ui/ExportButtons";
+import { SyncStatusPill } from "@/components/dashboard/SyncStatusPill";
 import { getBrowserSupabase, getSupabase } from "@/lib/supabase";
 
 type SummaryRow = {
@@ -598,6 +599,16 @@ export default function DashboardPage() {
             { label: "Overview", href: "/dashboard" },
             { label: "GST Reports", href: "/dashboard/gst" },
           ]}
+          statusControl={
+            <SyncStatusPill
+              lastVerifiedAt={
+                latestSummary?.last_synced_at ??
+                latestSummary?.updated_at ??
+                null
+              }
+              voucherCount={dashboard?.vouchers.length ?? 0}
+            />
+          }
         />
         <motion.main
           initial={{ opacity: 0, y: 12 }}

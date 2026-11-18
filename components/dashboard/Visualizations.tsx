@@ -164,6 +164,7 @@ export function FinancialVisualizations({
                 ))}
               </Pie>
               <Tooltip
+                cursor={{ fill: "rgba(229, 195, 101, 0.08)" }}
                 formatter={(value) =>
                   new Intl.NumberFormat("en-IN", {
                     style: "currency",

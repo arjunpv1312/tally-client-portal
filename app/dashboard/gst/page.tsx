@@ -11,6 +11,7 @@ import {
 } from "@/components/dashboard/DateFilter";
 import { DashboardContentSkeleton } from "@/components/dashboard/DashboardSkeleton";
 import { ExportButtons } from "@/components/ui/ExportButtons";
+import { SyncStatusPill } from "@/components/dashboard/SyncStatusPill";
 import { getSupabase } from "@/lib/supabase";
 
 type GstVoucher = {
@@ -20,6 +21,7 @@ type GstVoucher = {
   cgst_amount: number | string | null;
   sgst_amount: number | string | null;
   igst_amount: number | string | null;
+  updated_at?: string | null;
 };
 
 type MonthTotals = {
@@ -58,6 +60,8 @@ export default function GstReportPage() {
   const [months, setMonths] = useState<MonthTotals[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [lastVerifiedAt, setLastVerifiedAt] = useState<string | null>(null);
+  const [voucherCount, setVoucherCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,7 +90,7 @@ export default function GstReportPage() {
         const { data, error: voucherError } = await supabase
           .from("vouchers")
           .select(
-            "id, voucher_date, voucher_type, cgst_amount, sgst_amount, igst_amount",
+            "id, voucher_date, voucher_type, cgst_amount, sgst_amount, igst_amount, updated_at",
           )
           .eq("company_id", profile.company_id)
           .gte("voucher_date", dateRange.startDate)
@@ -123,6 +127,15 @@ export default function GstReportPage() {
         }
         if (!cancelled) {
           setMonths([...grouped.values()]);
+          const rows = data ?? [];
+          setVoucherCount(rows.length);
+          setLastVerifiedAt(
+            rows
+              .map((row) => row.updated_at)
+              .filter((value): value is string => Boolean(value))
+              .sort()
+              .at(-1) ?? null,
+          );
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -217,6 +230,12 @@ export default function GstReportPage() {
             { label: "Overview", href: "/dashboard" },
             { label: "GST Reports", href: "/dashboard/gst" },
           ]}
+          statusControl={
+            <SyncStatusPill
+              lastVerifiedAt={lastVerifiedAt}
+              voucherCount={voucherCount}
+            />
+          }
         />
         <motion.main
           initial={{ opacity: 0, y: 10 }}

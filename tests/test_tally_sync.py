@@ -15,6 +15,9 @@ from tally_sync import (
     SyncError,
     _load_env_file,
     _http_request,
+    _read_sync_state,
+    _write_sync_state,
+    _supabase_upsert,
     _company_id_from_environment,
     _voucher_row,
     _validate_supabase_url,
@@ -24,6 +27,7 @@ from tally_sync import (
     parse_daybook_xml,
     run_daemon,
     summarize_vouchers,
+    validate_configuration,
 )
 
 
@@ -215,6 +219,40 @@ class TallySyncTests(unittest.TestCase):
                     os.environ["SUPABASE_URL"], "https://existing.supabase.co"
                 )
                 self.assertEqual(os.environ["TALLY_COMPANY_NAME"], "Acme Traders")
+
+    def test_sync_state_is_read_and_written_as_absolute_iso_date(self) -> None:
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / ".sync_state.json"
+            with patch("tally_sync.SYNC_STATE_PATH", state_path):
+                self.assertIsNone(_read_sync_state())
+                _write_sync_state(date(2026, 10, 31))
+                self.assertEqual(
+                    _read_sync_state(),
+                    date(2026, 10, 31),
+                )
+
+    def test_supabase_upsert_uses_bearer_service_role_authorization(self) -> None:
+        request_ref = {}
+
+        def capture_request(request: Request, retries: int, timeout: int) -> bytes:
+            del retries, timeout
+            request_ref["request"] = request
+            return b""
+
+        with patch("tally_sync._http_request", side_effect=capture_request):
+            _supabase_upsert(
+                "https://project.example",
+                "service-secret",
+                "vouchers",
+                "company_id,tally_voucher_id",
+                [{"company_id": "company"}],
+                retries=0,
+                timeout=1,
+            )
+
+        request = request_ref["request"]
+        authorization = request.get_header("Authorization")
+        self.assertEqual(authorization, "Bearer service-secret")
 
     def test_company_id_supports_legacy_target_name(self) -> None:
         with patch.dict(

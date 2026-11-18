@@ -67,6 +67,7 @@ create table if not exists public.employee_work_logs (
   total_hours numeric(8, 2),
   completed_tasks text[] not null default '{}',
   pending_work text[] not null default '{}',
+  pending_tasks text[] not null default '{}',
   created_at timestamptz not null default now(),
   check (logout_time is null or logout_time >= login_time),
   check (total_hours is null or total_hours >= 0)
@@ -130,6 +131,195 @@ create index if not exists vouchers_company_date_idx
 
 create index if not exists financial_summaries_company_period_idx
   on public.financial_summaries (company_id, period_start);
+
+alter table public.employee_work_logs
+  add column if not exists pending_tasks text[] not null default '{}';
+
+create table if not exists public.audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid references auth.users (id) on delete set null,
+  action text not null,
+  entity_type text not null,
+  entity_id text,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table public.audit_logs enable row level security;
+
+create or replace function public.recalculate_financial_summary_for_voucher()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_company_id uuid;
+  target_period_start date;
+  target_period_end date;
+  sales numeric(18, 2);
+  purchases numeric(18, 2);
+  expenses numeric(18, 2);
+  gst_payable numeric(18, 2);
+  gst_input numeric(18, 2);
+begin
+  if tg_op = 'DELETE' then
+    target_company_id := old.company_id;
+    target_period_start := date_trunc('month', old.voucher_date)::date;
+  else
+    target_company_id := new.company_id;
+    target_period_start := date_trunc('month', new.voucher_date)::date;
+  end;
+
+  target_period_end := (target_period_start + interval '1 month - 1 day')::date;
+
+  select
+    coalesce(sum(sales_amount), 0),
+    coalesce(sum(purchase_amount), 0),
+    coalesce(sum(expense_amount), 0),
+    coalesce(sum(cgst_amount + sgst_amount + igst_amount)
+      filter (where voucher_type = 'sales'), 0),
+    coalesce(sum(cgst_amount + sgst_amount + igst_amount)
+      filter (where voucher_type = 'purchase'), 0)
+  into sales, purchases, expenses, gst_payable, gst_input
+  from public.vouchers
+  where company_id = target_company_id
+    and voucher_date >= target_period_start
+    and voucher_date <= target_period_end;
+
+  insert into public.financial_summaries (
+    company_id,
+    period_start,
+    period_end,
+    total_sales,
+    total_purchases,
+    total_expenses,
+    net_profit,
+    gst_payable,
+    gst_input,
+    last_synced_at,
+    updated_at
+  )
+  values (
+    target_company_id,
+    target_period_start,
+    target_period_end,
+    sales,
+    purchases,
+    expenses,
+    sales - purchases - expenses,
+    gst_payable,
+    gst_input,
+    now(),
+    now()
+  )
+  on conflict (company_id, period_start)
+  do update set
+    period_end = excluded.period_end,
+    total_sales = excluded.total_sales,
+    total_purchases = excluded.total_purchases,
+    total_expenses = excluded.total_expenses,
+    net_profit = excluded.net_profit,
+    gst_payable = excluded.gst_payable,
+    gst_input = excluded.gst_input,
+    last_synced_at = excluded.last_synced_at,
+    updated_at = excluded.updated_at;
+
+  if tg_op = 'UPDATE'
+     and (old.company_id is distinct from new.company_id
+       or old.voucher_date is distinct from new.voucher_date) then
+    target_company_id := old.company_id;
+    target_period_start := date_trunc('month', old.voucher_date)::date;
+    target_period_end := (target_period_start + interval '1 month - 1 day')::date;
+    select
+      coalesce(sum(sales_amount), 0),
+      coalesce(sum(purchase_amount), 0),
+      coalesce(sum(expense_amount), 0),
+      coalesce(sum(cgst_amount + sgst_amount + igst_amount)
+        filter (where voucher_type = 'sales'), 0),
+      coalesce(sum(cgst_amount + sgst_amount + igst_amount)
+        filter (where voucher_type = 'purchase'), 0)
+    into sales, purchases, expenses, gst_payable, gst_input
+    from public.vouchers
+    where company_id = target_company_id
+      and voucher_date >= target_period_start
+      and voucher_date <= target_period_end;
+    insert into public.financial_summaries (
+      company_id, period_start, period_end, total_sales,
+      total_purchases, total_expenses, net_profit,
+      gst_payable, gst_input, last_synced_at, updated_at
+    )
+    values (
+      target_company_id, target_period_start, target_period_end,
+      sales, purchases, expenses, sales - purchases - expenses,
+      gst_payable, gst_input, now(), now()
+    )
+    on conflict (company_id, period_start)
+    do update set
+      period_end = excluded.period_end,
+      total_sales = excluded.total_sales,
+      total_purchases = excluded.total_purchases,
+      total_expenses = excluded.total_expenses,
+      net_profit = excluded.net_profit,
+      gst_payable = excluded.gst_payable,
+      gst_input = excluded.gst_input,
+      last_synced_at = excluded.last_synced_at,
+      updated_at = excluded.updated_at;
+  end if;
+
+  return null;
+end;
+$$;
+
+drop trigger if exists trg_auto_recalculate_financial_summary on public.vouchers;
+create trigger trg_auto_recalculate_financial_summary
+after insert or update or delete on public.vouchers
+for each row execute function public.recalculate_financial_summary_for_voucher();
+
+create or replace function public.audit_voucher_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.audit_logs (
+    actor_id,
+    action,
+    entity_type,
+    entity_id,
+    details
+  )
+  values (
+    auth.uid(),
+    case tg_op
+      when 'INSERT' then 'voucher_created'
+      when 'UPDATE' then 'voucher_updated'
+      when 'DELETE' then 'voucher_deleted'
+    end,
+    'voucher',
+    coalesce(new.tally_voucher_id, old.tally_voucher_id),
+    jsonb_build_object(
+      'operation', tg_op,
+      'company_id', coalesce(new.company_id, old.company_id),
+      'voucher_date', coalesce(new.voucher_date, old.voucher_date)
+    )
+  );
+  return null;
+end;
+$$;
+
+drop trigger if exists trg_audit_voucher_change on public.vouchers;
+create trigger trg_audit_voucher_change
+after insert or update or delete on public.vouchers
+for each row execute function public.audit_voucher_change();
+
+drop policy if exists "Admins can read audit logs" on public.audit_logs;
+create policy "Admins can read audit logs"
+  on public.audit_logs
+  for select
+  to authenticated
+  using (public.is_admin());
 
 alter table public.profiles enable row level security;
 alter table public.companies enable row level security;

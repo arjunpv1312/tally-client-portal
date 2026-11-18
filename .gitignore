@@ -12,6 +12,10 @@
 
 # testing
 /coverage
+/.pytest_cache/
+.pytest_cache/
+/.ruff_cache/
+/.mypy_cache/
 
 # next.js
 /.next/
@@ -23,6 +27,13 @@
 # misc
 .DS_Store
 *.pem
+Thumbs.db
+Desktop.ini
+*.tmp
+*.bak
+*.orig
+*.log
+.sync_state.json
 
 # debug
 npm-debug.log*

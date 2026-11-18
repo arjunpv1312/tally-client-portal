@@ -40,6 +40,7 @@ TAX_LEDGER_TOKENS = {
 SUCCESS_LEVEL = logging.INFO + 5
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
 logger = logging.getLogger(__name__)
+SYNC_STATE_PATH = Path(__file__).with_name(".sync_state.json")
 
 
 class SyncError(Exception):
@@ -498,6 +499,36 @@ def _date_from_environment(name: str, fallback: date) -> date:
         raise SyncError(f"{name} must use YYYY-MM-DD format.") from error
 
 
+def _read_sync_state() -> date | None:
+    if not SYNC_STATE_PATH.exists():
+        return None
+    try:
+        state = json.loads(SYNC_STATE_PATH.read_text(encoding="utf-8"))
+        value = state.get("last_successful_sync_date")
+        return date.fromisoformat(value) if isinstance(value, str) else None
+    except (OSError, json.JSONDecodeError, ValueError):
+        logger.warning(
+            "Ignoring unreadable sync state at %s.",
+            SYNC_STATE_PATH,
+        )
+        return None
+
+
+def _write_sync_state(sync_date: date) -> None:
+    try:
+        SYNC_STATE_PATH.write_text(
+            json.dumps(
+                {"last_successful_sync_date": sync_date.isoformat()},
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except OSError as error:
+        logger.warning("Unable to persist sync state: %s", error)
+
+
 def _required_environment(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -579,6 +610,28 @@ def _load_env_file(path: Path) -> None:
         os.environ.setdefault(name, value)
 
 
+def validate_configuration() -> None:
+    _load_env_file(Path(__file__).with_name(".env"))
+    supabase_url_setting = (
+        os.environ.get("SUPABASE_URL")
+        or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+        or ""
+    ).strip()
+    if not supabase_url_setting:
+        raise SyncError("Required environment variable SUPABASE_URL is missing.")
+    _validate_supabase_url(supabase_url_setting)
+    _validate_tally_url(os.environ.get("TALLY_HOST", TALLY_URL).strip())
+    _required_environment("SUPABASE_SERVICE_ROLE_KEY")
+    company_id = _company_id_from_environment()
+    try:
+        str(uuid.UUID(company_id))
+    except ValueError as error:
+        raise SyncError(
+            "TALLY_COMPANY_ID or TARGET_COMPANY_ID must be a valid company UUID."
+        ) from error
+    _required_environment("TALLY_COMPANY_NAME")
+
+
 def run_sync() -> tuple[int, int]:
     _load_env_file(Path(__file__).with_name(".env"))
     supabase_url_setting = (
@@ -602,7 +655,16 @@ def run_sync() -> tuple[int, int]:
 
     today = date.today()
     fiscal_year_start = date(today.year if today.month >= 4 else today.year - 1, 4, 1)
-    from_date = _date_from_environment("TALLY_SYNC_FROM_DATE", fiscal_year_start)
+    if os.environ.get("TALLY_SYNC_FROM_DATE"):
+        from_date = _date_from_environment("TALLY_SYNC_FROM_DATE", fiscal_year_start)
+    else:
+        state_date = _read_sync_state()
+        from_date = (
+            state_date + timedelta(days=1)
+            if state_date is not None
+            else fiscal_year_start
+        )
+        from_date = max(from_date, fiscal_year_start)
     to_date = _date_from_environment("TALLY_SYNC_TO_DATE", today)
     if from_date > to_date:
         raise SyncError("TALLY_SYNC_FROM_DATE must not be after TALLY_SYNC_TO_DATE.")
@@ -655,6 +717,7 @@ def run_sync() -> tuple[int, int]:
         retries,
         timeout,
     )
+    _write_sync_state(today)
     return len(voucher_rows), len(summary_rows)
 
 
@@ -665,12 +728,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="run one sync and exit instead of entering 30-minute daemon mode",
     )
+    parser.add_argument(
+        "--validate-config",
+        action="store_true",
+        help="validate local configuration and exit without contacting Tally or Supabase",
+    )
     arguments = parser.parse_args(argv)
 
     logging.basicConfig(
         level=logging.INFO,
         format="[%(asctime)s] [%(levelname)s] %(message)s",
     )
+
+    if arguments.validate_config:
+        try:
+            validate_configuration()
+        except SyncError as error:
+            logger.error("Configuration validation failed: %s", error)
+            return 1
+        logger.log(SUCCESS_LEVEL, "Configuration validation complete.")
+        return 0
 
     if not arguments.once:
         return run_daemon()

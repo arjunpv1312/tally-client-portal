@@ -41,6 +41,14 @@ if not exist ".env" (
     popd
     exit /b 1
 )
+%PYTHON% tally_sync.py --validate-config
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Configuration validation failed. Update .env and try again.
+    pause
+    popd
+    exit /b 1
+)
 
 echo [3/3] Starting Tally sync daemon (30-minute interval)...
 echo Press Ctrl+C to stop the daemon; it will attempt a final sync.

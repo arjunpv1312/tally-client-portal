@@ -25,6 +25,7 @@ type AppHeaderProps = {
   navItems?: HeaderNavItem[];
   activeNavItem?: string;
   contextControl?: ReactNode;
+  statusControl?: ReactNode;
   onLogoutRequest?: () => Promise<boolean>;
   commandCompanies?: { id: string; name: string }[];
   onCommandCompanySelect?: (company: { id: string; name: string }) => void;
@@ -48,6 +49,7 @@ export function AppHeader({
   navItems = [],
   activeNavItem,
   contextControl,
+  statusControl,
   onLogoutRequest,
   commandCompanies,
   onCommandCompanySelect,
@@ -150,6 +152,9 @@ export function AppHeader({
           companies={commandCompanies}
           onCompanySelect={onCommandCompanySelect}
         />
+        {statusControl ? (
+          <div className="hidden lg:block">{statusControl}</div>
+        ) : null}
         {contextControl ? (
           <div className="hidden sm:block">{contextControl}</div>
         ) : null}
