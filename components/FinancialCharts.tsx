@@ -24,7 +24,17 @@ const chartTooltipStyle = {
   border: "1px solid var(--chart-tooltip-border, #e2e8f0)",
   background: "var(--chart-tooltip-bg, #fff)",
   color: "var(--foreground, #0f172a)",
+  fontFamily: "var(--font-geist-mono), monospace",
+  fontVariantNumeric: "tabular-nums",
 };
+
+function formatInr(value: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
+}
 
 function useMobileChartLayout() {
   const [isMobile, setIsMobile] = useState(false);
@@ -54,7 +64,10 @@ export function SalesExpensesBarChart({ data }: FinancialChartsProps) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="period" interval={isMobile ? "preserveStartEnd" : 0} tick={axisTick} />
           <YAxis tick={axisTick} />
-          <Tooltip contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }} />
+          <Tooltip
+            formatter={(value) => formatInr(Number(value))}
+            contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }}
+          />
           <Legend wrapperStyle={{ fontSize: isMobile ? 11 : 13 }} />
           <Bar dataKey="sales" name="Sales" fill="#E5C365" radius={[6, 6, 0, 0]} />
           <Bar
@@ -89,7 +102,10 @@ export function NetProfitAreaChart({ data }: FinancialChartsProps) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="period" interval={isMobile ? "preserveStartEnd" : 0} tick={axisTick} />
           <YAxis tick={axisTick} />
-          <Tooltip contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }} />
+          <Tooltip
+            formatter={(value) => formatInr(Number(value))}
+            contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }}
+          />
           <Area
             type="monotone"
             dataKey="net_profit"
@@ -123,7 +139,10 @@ export function GstSummaryBarChart({ data }: FinancialChartsProps) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="period" interval={isMobile ? "preserveStartEnd" : 0} tick={axisTick} />
           <YAxis tick={axisTick} />
-          <Tooltip contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }} />
+          <Tooltip
+            formatter={(value) => formatInr(Number(value))}
+            contentStyle={{ ...chartTooltipStyle, fontSize: isMobile ? 11 : 13 }}
+          />
           <Legend wrapperStyle={{ fontSize: isMobile ? 11 : 13 }} />
           <Bar dataKey="GST Payable" fill="#E5C365" radius={[6, 6, 0, 0]} />
           <Bar dataKey="GST Input" fill="#9E7C28" radius={[6, 6, 0, 0]} />

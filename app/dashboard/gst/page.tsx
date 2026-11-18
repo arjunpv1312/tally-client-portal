@@ -10,7 +10,9 @@ import {
   type DateRange,
 } from "@/components/dashboard/DateFilter";
 import { DashboardContentSkeleton } from "@/components/dashboard/DashboardSkeleton";
+import { SyncStatusPill } from "@/components/dashboard/SyncStatusPill";
 import { ExportButtons } from "@/components/ui/ExportButtons";
+import { SpotlightCard } from "@/components/ui/SpotlightCard";
 import { getSupabase } from "@/lib/supabase";
 
 type GstVoucher = {
@@ -20,6 +22,7 @@ type GstVoucher = {
   cgst_amount: number | string | null;
   sgst_amount: number | string | null;
   igst_amount: number | string | null;
+  updated_at?: string | null;
 };
 
 type MonthTotals = {
@@ -56,6 +59,7 @@ function formatMonth(month: string) {
 export default function GstReportPage() {
   const [dateRange, setDateRange] = useState<DateRange>(getInitialDateRange);
   const [months, setMonths] = useState<MonthTotals[]>([]);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -83,10 +87,10 @@ export default function GstReportPage() {
           throw new Error("No client company is linked to this account.");
         }
 
-        const { data, error: voucherError } = await supabase
+        let { data, error: voucherError } = await supabase
           .from("vouchers")
           .select(
-            "id, voucher_date, voucher_type, cgst_amount, sgst_amount, igst_amount",
+            "id, voucher_date, voucher_type, cgst_amount, sgst_amount, igst_amount, updated_at",
           )
           .eq("company_id", profile.company_id)
           .gte("voucher_date", dateRange.startDate)
@@ -94,7 +98,29 @@ export default function GstReportPage() {
           .order("voucher_date", { ascending: true })
           .limit(5000)
           .returns<GstVoucher[]>();
+        if (voucherError) {
+          const fallback = await supabase
+            .from("vouchers")
+            .select(
+              "id, voucher_date, voucher_type, cgst_amount, sgst_amount, igst_amount",
+            )
+            .eq("company_id", profile.company_id)
+            .gte("voucher_date", dateRange.startDate)
+            .lte("voucher_date", dateRange.endDate)
+            .order("voucher_date", { ascending: true })
+            .limit(5000)
+            .returns<GstVoucher[]>();
+          data = fallback.data;
+          voucherError = fallback.error;
+        }
         if (voucherError) throw new Error(voucherError.message);
+
+        const latestTimestamp = (data ?? [])
+          .map((voucher) => voucher.updated_at ?? null)
+          .filter((value): value is string => Boolean(value))
+          .map((value) => ({ value, time: Date.parse(value) }))
+          .filter((item) => !Number.isNaN(item.time))
+          .sort((left, right) => right.time - left.time)[0]?.value ?? null;
 
         const grouped = new Map<string, MonthTotals>();
         for (const voucher of data ?? []) {
@@ -123,6 +149,7 @@ export default function GstReportPage() {
         }
         if (!cancelled) {
           setMonths([...grouped.values()]);
+          setLastSyncedAt(latestTimestamp);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -213,6 +240,7 @@ export default function GstReportPage() {
           title="GST Reports"
           subtitle="Output tax, input tax, and monthly liabilities"
           roleLabel="Client"
+          contextControl={<SyncStatusPill timestamp={lastSyncedAt} />}
           navItems={[
             { label: "Overview", href: "/dashboard" },
             { label: "GST Reports", href: "/dashboard/gst" },
@@ -234,9 +262,14 @@ export default function GstReportPage() {
           ) : (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {dateRange.startDate} through {dateRange.endDate}
-                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    {dateRange.startDate} through {dateRange.endDate}
+                  </p>
+                  <div className="sm:hidden">
+                    <SyncStatusPill timestamp={lastSyncedAt} />
+                  </div>
+                </div>
                 <ExportButtons
                   reportTitle="GST summary"
                   filename="finora-gst-summary"
@@ -249,15 +282,12 @@ export default function GstReportPage() {
                   ["Input GST (Purchases)", inputTax],
                   ["Net Payable", netPayable],
                 ].map(([label, value]) => (
-                  <article
-                    key={String(label)}
-                    className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-5 shadow-sm transition-colors hover:border-[#E5C365]/40 dark:border-white/[0.08] dark:bg-[#111722] dark:hover:border-[#E5C365]/30"
-                  >
+                  <SpotlightCard key={String(label)} className="p-5 shadow-sm">
                     <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
-                    <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                    <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-slate-900 dark:text-[#F8F4E8]">
                       {currency(Number(value))}
                     </p>
-                  </article>
+                  </SpotlightCard>
                 ))}
               </section>
 
@@ -317,7 +347,7 @@ export default function GstReportPage() {
                             aria-valuenow={Math.max(0, liability)}
                           >
                             <div
-                              className="h-full rounded-full bg-gradient-to-r from-blue-500 to-amber-400 transition-all"
+                              className="h-full rounded-full bg-gradient-to-r from-[#9E7C28] to-[#E5C365] transition-all"
                               style={{ width: `${width}%` }}
                             />
                           </div>
