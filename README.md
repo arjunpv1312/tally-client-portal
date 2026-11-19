@@ -42,7 +42,7 @@ sequenceDiagram
     Worker->>Worker: Parse XML, classify entries, calculate summaries
     Worker->>DB: Batch upsert vouchers and summaries (up to 250 rows)
     Note over Worker,DB: Worker authenticates with a server-only service-role key
-    DB-->>Worker: REST response; voucher key company_id + tally_voucher_id, summary key company_id + period_start
+    DB-->>Worker: REST response for voucher and monthly summary upserts
     App->>DB: Authenticated company-scoped queries
     DB-->>App: RLS-authorized vouchers and financial summaries
     DB-->>App: Realtime Postgres Changes notifications
