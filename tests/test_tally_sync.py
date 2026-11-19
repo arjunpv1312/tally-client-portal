@@ -1,6 +1,7 @@
-import unittest
+import json
 import os
 import ssl
+import unittest
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -16,6 +17,7 @@ from tally_sync import (
     _load_env_file,
     _http_request,
     _read_sync_state,
+    _summary_row,
     _write_sync_state,
     _supabase_upsert,
     _company_id_from_environment,
@@ -104,6 +106,8 @@ class TallySyncTests(unittest.TestCase):
         self.assertEqual(summary["net_profit"], Decimal("-150.00"))
         self.assertEqual(summary["gst_payable"], Decimal("18.00"))
         self.assertEqual(summary["gst_input"], Decimal("36.00"))
+        row = _summary_row("company-1", summary, "2026-10-31T12:00:00+00:00")
+        self.assertEqual(row["period_date"], "2026-10-01")
 
     def test_rejects_malformed_or_error_xml(self) -> None:
         with self.assertRaises(SyncError):
@@ -252,6 +256,30 @@ class TallySyncTests(unittest.TestCase):
         request = request_ref["request"]
         authorization = request.get_header("Authorization")
         self.assertEqual(authorization, "Bearer service-secret")
+
+    def test_supabase_upsert_splits_rows_into_configured_batches(self) -> None:
+        payload_sizes = []
+
+        def capture_request(request: Request, retries: int, timeout: int) -> bytes:
+            del retries, timeout
+            payload_sizes.append(len(json.loads(request.data or b"[]")))
+            return b""
+
+        with (
+            patch("tally_sync.UPSERT_BATCH_SIZE", 2),
+            patch("tally_sync._http_request", side_effect=capture_request),
+        ):
+            _supabase_upsert(
+                "https://project.example",
+                "service-secret",
+                "vouchers",
+                "company_id,tally_voucher_id",
+                [{"id": str(index)} for index in range(5)],
+                retries=0,
+                timeout=1,
+            )
+
+        self.assertEqual(payload_sizes, [2, 2, 1])
 
     def test_company_id_supports_legacy_target_name(self) -> None:
         with patch.dict(

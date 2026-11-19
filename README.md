@@ -63,7 +63,7 @@ variable.
 | Authentication and roles | Supabase Auth, profiles, and role-checked Next.js routes | `proxy.ts` enforces route roles; privileged admin APIs independently verify the access token and admin profile. Route checks do not replace database authorization. |
 | Tenant data access | PostgreSQL Row Level Security | [`supabase/schema.sql`](./supabase/schema.sql) enables RLS and defines user/company/employee and admin policies for the current tables. Test policies against the deployed schema and every role. |
 | Tally data ingestion | Python standard-library worker using TallyPrime XML/HTTP and Supabase REST | Upserts batches of 250 records. Unique constraints cover `(company_id, tally_voucher_id)` and `(company_id, period_start)`; this provides idempotent keys for those records. |
-| Database | PostgreSQL tables, foreign keys, constraints, and indexes | Current schema defines profiles, companies, assignments, employee shift/task work logs, vouchers, and summaries. It does not define a general-purpose audit log, automatic summary triggers, or `v_company_voucher_totals` view. |
+| Database | PostgreSQL tables, foreign keys, constraints, indexes, and RLS | Current schema defines profiles, companies, assignments, employee work logs, vouchers, financial summaries, audit logging, and voucher-driven summary triggers. It does not define a `v_company_voucher_totals` view. |
 | Frontend | Next.js 16 App Router, React 19, TypeScript, Tailwind CSS, Framer Motion, Recharts | Dashboard subscribes to Supabase Postgres Changes and refreshes data using the authenticated client. This is not a claim that all charts are code-split or that the UI has been independently audited. |
 | Privacy and cryptography | Deployment-dependent | Hosting, TLS versions, encryption at rest, backup retention, and region depend on the configured providers. See [COMPLIANCE.md](./COMPLIANCE.md); this repository does not certify DPDP/GDPR compliance or a particular cipher suite. |
 
@@ -149,7 +149,7 @@ The browser uses the public project URL and anon/publishable key. The service-ro
 ### 3. Initialize Supabase
 
 1. Open the Supabase project **SQL Editor**.
-2. Run [`supabase/schema.sql`](./supabase/schema.sql). It creates profile, company, employee-assignment, employee work-log, voucher, and financial-summary structures and configures RLS policies. Re-running the SQL safely adds the reporting tables and policies.
+2. Run [`supabase/schema.sql`](./supabase/schema.sql). It creates profile, company, employee-assignment, employee work-log, voucher, and financial-summary structures and configures RLS policies. The migration removes the legacy gross-total summary trigger, keeps legacy `period_date` aligned with `period_start`, and recalculates existing summaries from pre-tax voucher category amounts without rewriting voucher rows.
 3. In **Authentication → Users**, create the first administrator.
 4. Copy the new Auth user's UUID, then run the bootstrap `INSERT` at the end of `schema.sql` with that UUID, email, and an administrator display name.
 5. Sign in at `/login` using the Admin role tab.
@@ -323,11 +323,14 @@ Use this checklist for each deployment; items that require provider access must
 be verified in the target Supabase or Vercel project.
 
 - [ ] Apply [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL
-      Editor. Confirm `employee_work_logs` exists.
+      Editor. It adds compatible columns, installs voucher summary/audit
+      triggers, and recalculates existing financial summaries from category
+      amounts without rewriting every voucher row.
 - [ ] Confirm RLS is enabled for the tables defined in the schema:
       `profiles`, `companies`, `company_employees`, `employee_work_logs`,
-      `vouchers`, and `financial_summaries`. This repository schema does not
-      define `audit_logs`, `ledgers`, triggers, or `v_company_voucher_totals`.
+      `vouchers`, `financial_summaries`, and `audit_logs`. The schema creates
+      voucher summary/audit triggers and backfills existing financial summaries
+      from the pre-tax voucher category amounts.
 - [ ] Keep `SUPABASE_SERVICE_ROLE_KEY` only in the sync machine's ignored
       `.env` and server-side deployment settings. Never expose it with a
       `NEXT_PUBLIC_` prefix.
@@ -351,7 +354,7 @@ be verified in the target Supabase or Vercel project.
       `SUPABASE_SERVICE_ROLE_KEY` for the relevant Vercel environments, then
       verify the deployment.
 - [ ] Confirm the GitHub Actions workflow passes on `main`. CI runs
-      `npx tsc --noEmit`, `npm run lint`, Python `unittest` discovery, and
+      `npx tsc --noEmit`, `npm run lint`, `python -m pytest`, and
       `npm run build`.
 
 ## Troubleshooting FAQ

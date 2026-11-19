@@ -472,6 +472,7 @@ def _summary_row(
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "company_id": company_id,
+        "period_date": summary["period_start"],
         "period_start": summary["period_start"],
         "period_end": summary["period_end"],
         "last_synced_at": synced_at,

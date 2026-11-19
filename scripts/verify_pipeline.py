@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import sys
 import time
-import urllib.error
 import http.client
+import urllib.error
 import urllib.parse
 import urllib.request
 from decimal import Decimal
@@ -18,10 +19,19 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 TEST_MARKER = "__FINORA_E2E_TEST__"
+TEST_TOKEN_PATTERN = re.compile(
+    r"__FINORA_E2E_TEST__|(?:^|[^A-Z0-9])TEST(?:$|[^A-Z0-9])|"
+    r"TEST_BATCH_|TEST_PURCHASE_",
+    re.IGNORECASE,
+)
 
 
 class VerificationError(RuntimeError):
     pass
+
+
+def contains_test_marker(value: Any) -> bool:
+    return bool(TEST_TOKEN_PATTERN.search(str(value)))
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -157,9 +167,11 @@ def cleanup_test_data(
         "financial_summaries": 0,
         "employee_work_logs": 0,
         "audit_logs": 0,
+        "profiles": 0,
         "auth_users": 0,
     }
     target_ids = set(company_ids or set())
+    target_auth_user_ids = set(auth_user_ids or set())
 
     companies = get_rows(
         "companies",
@@ -168,12 +180,21 @@ def cleanup_test_data(
     marker_companies = [
         row
         for row in companies
-        if TEST_MARKER in str(row.get("name", ""))
-        or "TEST_" in str(row.get("name", "")).upper()
-        or "TEST" in str(row.get("name", "")).upper()
+        if contains_test_marker(row.get("name", ""))
     ]
     for row in marker_companies:
         target_ids.add(str(row["id"]))
+
+    if table_exists("profiles"):
+        profiles = get_rows("profiles", {"select": "*", "limit": "10000"})
+        for profile in profiles:
+            if contains_test_marker(
+                f"{profile.get('email', '')} {profile.get('full_name', '')}"
+            ):
+                profile_id = str(profile["id"])
+                target_auth_user_ids.add(profile_id)
+                delete_rows("profiles", {"id": f"eq.{profile_id}"})
+                counts["profiles"] += 1
 
     if table_exists("vouchers"):
         all_vouchers = get_rows(
@@ -183,13 +204,7 @@ def cleanup_test_data(
         for row in all_vouchers:
             tally_id = str(row.get("tally_voucher_id", "")).upper()
             company_id = str(row.get("company_id", ""))
-            if (
-                TEST_MARKER in tally_id
-                or tally_id.startswith("TEST_BATCH_")
-                or tally_id.startswith("TEST_PURCHASE_")
-                or TEST_MARKER in tally_id
-                or company_id in target_ids
-            ):
+            if contains_test_marker(tally_id) or company_id in target_ids:
                 delete_rows("vouchers", {"id": f"eq.{row['id']}"})
                 counts["vouchers"] += 1
 
@@ -236,8 +251,9 @@ def cleanup_test_data(
             entity_id = str(row.get("entity_id", ""))
             if (
                 company_id in target_ids
-                or TEST_MARKER in entity_id
-                or TEST_MARKER in details_text
+                or contains_test_marker(entity_id)
+                or contains_test_marker(details_text)
+                or contains_test_marker(json.dumps(row, ensure_ascii=False))
             ):
                 delete_rows("audit_logs", {"id": f"eq.{row['id']}"})
                 counts["audit_logs"] += 1
@@ -246,65 +262,68 @@ def cleanup_test_data(
         delete_rows("companies", {"id": f"eq.{company_id}"})
         counts["companies"] += 1
 
-    for auth_user_id in auth_user_ids or set():
-        status, _ = rest_request(
-            "DELETE",
-            f"/auth/v1/admin/users/{auth_user_id}",
-        )
-        if status in {200, 204}:
-            counts["auth_users"] += 1
+    for auth_user_id in target_auth_user_ids:
+        try:
+            status, _ = rest_request(
+                "DELETE",
+                f"/auth/v1/admin/users/{auth_user_id}",
+            )
+        except VerificationError as error:
+            if "HTTP 404" not in str(error):
+                raise
+        else:
+            if status in {200, 204}:
+                counts["auth_users"] += 1
 
     return counts
 
 
-def assert_zero_test_residue() -> dict[str, int]:
+def assert_zero_test_residue(
+    company_ids: set[str] | None = None,
+) -> dict[str, int]:
+    known_test_company_ids = company_ids or set()
     residue = {
         "companies": 0,
         "vouchers": 0,
         "financial_summaries": 0,
         "employee_work_logs": 0,
         "audit_logs": 0,
+        "profiles": 0,
     }
 
-    companies = get_rows(
-        "companies",
-        {"select": "id,name", "limit": "10000"},
-    )
+    companies = get_rows("companies", {"select": "*", "limit": "10000"})
+    test_company_ids = {
+        str(row["id"])
+        for row in companies
+        if contains_test_marker(json.dumps(row, ensure_ascii=False))
+    }
+    known_test_company_ids = known_test_company_ids | test_company_ids
     residue["companies"] = sum(
         1
         for row in companies
-        if "TEST" in str(row.get("name", "")).upper()
-        or TEST_MARKER in str(row.get("name", ""))
+        if contains_test_marker(json.dumps(row, ensure_ascii=False))
     )
 
     if table_exists("vouchers"):
-        vouchers = get_rows(
-            "vouchers",
-            {"select": "id,tally_voucher_id", "limit": "10000"},
-        )
+        vouchers = get_rows("vouchers", {"select": "*", "limit": "10000"})
         residue["vouchers"] = sum(
             1
             for row in vouchers
-            if "TEST" in str(row.get("tally_voucher_id", "")).upper()
-            or TEST_MARKER in str(row.get("tally_voucher_id", ""))
+            if (
+                contains_test_marker(json.dumps(row, ensure_ascii=False))
+                or str(row.get("company_id", "")) in known_test_company_ids
+            )
         )
 
     if table_exists("financial_summaries"):
         summaries = get_rows(
             "financial_summaries",
-            {"select": "id,company_id", "limit": "10000"},
+            {"select": "*", "limit": "10000"},
         )
         residue["financial_summaries"] = sum(
             1
             for row in summaries
-            if str(row.get("company_id", "")) in {
-                str(company_id)
-                for company_id in [
-                    row2.get("id")
-                    for row2 in companies
-                    if "TEST" in str(row2.get("name", "")).upper()
-                ]
-            }
+            if str(row.get("company_id", "")) in known_test_company_ids
         )
 
     if table_exists("employee_work_logs"):
@@ -312,14 +331,9 @@ def assert_zero_test_residue() -> dict[str, int]:
         residue["employee_work_logs"] = sum(
             1
             for row in work_logs
-            if any(
-                TEST_MARKER in str(value)
-                for key in ("completed_tasks", "pending_work", "pending_tasks")
-                for value in (
-                    row[key]
-                    if isinstance(row.get(key), list)
-                    else []
-                )
+            if (
+                contains_test_marker(json.dumps(row, ensure_ascii=False))
+                or str(row.get("company_id", "")) in known_test_company_ids
             )
         )
 
@@ -328,8 +342,24 @@ def assert_zero_test_residue() -> dict[str, int]:
         residue["audit_logs"] = sum(
             1
             for row in audit_logs
-            if TEST_MARKER in str(row.get("entity_id", ""))
-            or TEST_MARKER in json.dumps(row.get("details", {}))
+            if (
+                contains_test_marker(json.dumps(row, ensure_ascii=False))
+                or (
+                    isinstance(row.get("details"), dict)
+                    and str(row["details"].get("company_id", ""))
+                    in known_test_company_ids
+                )
+            )
+        )
+
+    if table_exists("profiles"):
+        profiles = get_rows("profiles", {"select": "*", "limit": "10000"})
+        residue["profiles"] = sum(
+            1
+            for row in profiles
+            if contains_test_marker(
+                f"{row.get('email', '')} {row.get('full_name', '')}"
+            )
         )
 
     if any(residue.values()):
@@ -339,12 +369,14 @@ def assert_zero_test_residue() -> dict[str, int]:
     return residue
 
 
-def create_employee_profile_and_work_log(company_id: str) -> tuple[str, str, str]:
+def create_employee_profile_and_work_log(
+    company_id: str,
+    created_auth_user_ids: set[str],
+) -> tuple[str, str]:
     profiles = get_rows(
         "profiles",
         {"select": "id,email,role", "role": "eq.employee", "limit": "1"},
     )
-    created_auth_user_id: str | None = None
     if profiles:
         employee_id = str(profiles[0]["id"])
     else:
@@ -365,7 +397,7 @@ def create_employee_profile_and_work_log(company_id: str) -> tuple[str, str, str
         if status not in {200, 201} or not isinstance(auth_payload, dict):
             raise VerificationError("Unable to create the synthetic E2E auth user.")
         employee_id = str(auth_payload["id"])
-        created_auth_user_id = employee_id
+        created_auth_user_ids.add(employee_id)
         rest_request(
             "POST",
             "/rest/v1/profiles",
@@ -379,15 +411,20 @@ def create_employee_profile_and_work_log(company_id: str) -> tuple[str, str, str
             prefer="return=representation",
         )
 
+    assignment_payload: dict[str, Any] = {"company_id": company_id}
+    for column in ("employee_id", "user_id"):
+        if column_exists("company_employees", column):
+            assignment_payload[column] = employee_id
+    if not any(column in assignment_payload for column in ("employee_id", "user_id")):
+        raise VerificationError(
+            "The company assignment table has neither employee_id nor user_id."
+        )
+    if column_exists("company_employees", "entry_status"):
+        assignment_payload["entry_status"] = "pending"
     rest_request(
         "POST",
         "/rest/v1/company_employees",
-        payload={
-            "employee_id": employee_id,
-            "user_id": employee_id,
-            "company_id": company_id,
-            "entry_status": "pending",
-        },
+        payload=assignment_payload,
         prefer="resolution=merge-duplicates,return=representation",
     )
     status, work_logs = rest_request(
@@ -397,19 +434,21 @@ def create_employee_profile_and_work_log(company_id: str) -> tuple[str, str, str
             "user_id": employee_id,
             "company_id": company_id,
             "completed_tasks": [f"{TEST_MARKER} completed"],
-            "pending_tasks": [f"{TEST_MARKER} pending"],
+            "pending_work": [f"{TEST_MARKER} pending work"],
+            "pending_tasks": [f"{TEST_MARKER} pending task"],
         },
         prefer="return=representation",
     )
     if status not in {200, 201} or not isinstance(work_logs, list) or not work_logs:
         raise VerificationError("Employee work-log verification did not return a row.")
     work_log = work_logs[0]
-    return employee_id, str(work_log["id"]), created_auth_user_id or ""
+    return employee_id, str(work_log["id"])
 
 
 def main() -> int:
     company_id = ""
     created_auth_user_ids: set[str] = set()
+    exit_code = 0
     try:
         initial_cleanup = cleanup_test_data()
         print(
@@ -512,11 +551,10 @@ def main() -> int:
             prefer="return=representation",
         )
 
-        employee_id, work_log_id, created_auth_user_id = (
-            create_employee_profile_and_work_log(company_id)
+        employee_id, work_log_id = create_employee_profile_and_work_log(
+            company_id,
+            created_auth_user_ids,
         )
-        if created_auth_user_id:
-            created_auth_user_ids.add(created_auth_user_id)
 
         work_logs = get_rows(
             "employee_work_logs",
@@ -525,23 +563,36 @@ def main() -> int:
         if not work_logs:
             raise VerificationError("Synthetic employee work-log row was not found.")
         work_log_row = work_logs[0]
-        if not work_log_row.get("completed_tasks") or not (
-            work_log_row.get("pending_tasks")
-            or work_log_row.get("pending_work")
-        ):
+        if not work_log_row.get("completed_tasks"):
             raise VerificationError(
-                "Employee work-log pending/completed task columns did not persist."
+                "The employee work-log completed_tasks column did not persist."
             )
+        for column in ("pending_work", "pending_tasks"):
+            if not work_log_row.get(column):
+                raise VerificationError(
+                    f"The employee work-log {column} column did not persist."
+                )
 
-        rest_request(
+        audit_payload: dict[str, Any] = {
+            "action": "e2e_verification",
+            "details": {"company_id": company_id, "marker": TEST_MARKER},
+        }
+        if column_exists("audit_logs", "entity_type"):
+            audit_payload["entity_type"] = "pipeline"
+        if column_exists("audit_logs", "entity_id"):
+            audit_payload["entity_id"] = f"{TEST_MARKER}-PIPELINE"
+        audit_status, audit_rows = rest_request(
             "POST",
             "/rest/v1/audit_logs",
-            payload={
-                "action": "e2e_verification",
-                "details": {"company_id": company_id, "marker": TEST_MARKER},
-            },
+            payload=audit_payload,
             prefer="return=representation",
         )
+        if (
+            audit_status not in {200, 201}
+            or not isinstance(audit_rows, list)
+            or not audit_rows
+        ):
+            raise VerificationError("Synthetic audit event creation failed.")
 
         summary_columns = [
             "period_start",
@@ -640,10 +691,9 @@ def main() -> int:
             f"employee={employee_id}, work_log={work_log_id}",
         )
         print(f"[INFO] Initial cleanup count: {initial_cleanup}")
-        return 0
     except VerificationError as error:
         print(f"[ERROR] {error}", file=sys.stderr)
-        return 1
+        exit_code = 1
     finally:
         try:
             cleanup = cleanup_test_data(
@@ -656,11 +706,16 @@ def main() -> int:
                 f"[ERROR] Mandatory cleanup could not complete: {error}",
                 file=sys.stderr,
             )
+            exit_code = 1
         try:
-            residue = assert_zero_test_residue()
+            residue = assert_zero_test_residue(
+                {company_id} if company_id else None
+            )
             print(f"[SUCCESS] Post-cleanup integrity assertion passed: {residue}")
         except VerificationError as error:
             print(f"[ERROR] {error}", file=sys.stderr)
+            exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":

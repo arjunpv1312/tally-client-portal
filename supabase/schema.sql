@@ -111,6 +111,7 @@ alter table public.vouchers
 create table if not exists public.financial_summaries (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies (id) on delete cascade,
+  period_date date not null,
   period_start date not null,
   period_end date not null,
   total_sales numeric(18, 2) not null default 0,
@@ -119,12 +120,27 @@ create table if not exists public.financial_summaries (
   net_profit numeric(18, 2) not null default 0,
   gst_payable numeric(18, 2) not null default 0,
   gst_input numeric(18, 2) not null default 0,
-  last_synced_at timestamptz not null default now(),
+  last_synced_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (company_id, period_start),
   check (period_end >= period_start)
 );
+
+alter table public.financial_summaries
+  add column if not exists period_date date,
+  add column if not exists gst_input numeric(18, 2) not null default 0,
+  add column if not exists last_synced_at timestamptz;
+
+update public.financial_summaries
+set period_date = period_start
+where period_start is not null
+  and period_date is distinct from period_start;
+
+alter table public.financial_summaries
+  alter column period_date set not null,
+  alter column last_synced_at drop not null,
+  alter column last_synced_at drop default;
 
 create index if not exists vouchers_company_date_idx
   on public.vouchers (company_id, voucher_date desc);
@@ -133,6 +149,7 @@ create index if not exists financial_summaries_company_period_idx
   on public.financial_summaries (company_id, period_start);
 
 alter table public.employee_work_logs
+  add column if not exists pending_work text[] not null default '{}',
   add column if not exists pending_tasks text[] not null default '{}';
 
 create table if not exists public.audit_logs (
@@ -144,6 +161,14 @@ create table if not exists public.audit_logs (
   details jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+alter table public.audit_logs
+  add column if not exists actor_id uuid references auth.users (id) on delete set null,
+  add column if not exists action text not null default 'unknown',
+  add column if not exists entity_type text not null default 'unknown',
+  add column if not exists entity_id text,
+  add column if not exists details jsonb not null default '{}'::jsonb,
+  add column if not exists created_at timestamptz not null default now();
 
 alter table public.audit_logs enable row level security;
 
@@ -169,7 +194,7 @@ begin
   else
     target_company_id := new.company_id;
     target_period_start := date_trunc('month', new.voucher_date)::date;
-  end;
+  end if;
 
   target_period_end := (target_period_start + interval '1 month - 1 day')::date;
 
@@ -189,6 +214,7 @@ begin
 
   insert into public.financial_summaries (
     company_id,
+    period_date,
     period_start,
     period_end,
     total_sales,
@@ -203,6 +229,7 @@ begin
   values (
     target_company_id,
     target_period_start,
+    target_period_start,
     target_period_end,
     sales,
     purchases,
@@ -215,6 +242,7 @@ begin
   )
   on conflict (company_id, period_start)
   do update set
+    period_date = excluded.period_date,
     period_end = excluded.period_end,
     total_sales = excluded.total_sales,
     total_purchases = excluded.total_purchases,
@@ -245,17 +273,18 @@ begin
       and voucher_date >= target_period_start
       and voucher_date <= target_period_end;
     insert into public.financial_summaries (
-      company_id, period_start, period_end, total_sales,
+      company_id, period_date, period_start, period_end, total_sales,
       total_purchases, total_expenses, net_profit,
       gst_payable, gst_input, last_synced_at, updated_at
     )
     values (
-      target_company_id, target_period_start, target_period_end,
+      target_company_id, target_period_start, target_period_start, target_period_end,
       sales, purchases, expenses, sales - purchases - expenses,
       gst_payable, gst_input, now(), now()
     )
     on conflict (company_id, period_start)
     do update set
+      period_date = excluded.period_date,
       period_end = excluded.period_end,
       total_sales = excluded.total_sales,
       total_purchases = excluded.total_purchases,
@@ -272,9 +301,53 @@ end;
 $$;
 
 drop trigger if exists trg_auto_recalculate_financial_summary on public.vouchers;
+drop trigger if exists trg_vouchers_auto_summary on public.vouchers;
 create trigger trg_auto_recalculate_financial_summary
 after insert or update or delete on public.vouchers
 for each row execute function public.recalculate_financial_summary_for_voucher();
+
+insert into public.financial_summaries (
+  company_id,
+  period_date,
+  period_start,
+  period_end,
+  total_sales,
+  total_purchases,
+  total_expenses,
+  net_profit,
+  gst_payable,
+  gst_input,
+  last_synced_at,
+  updated_at
+)
+select
+  company_id,
+  date_trunc('month', voucher_date)::date,
+  date_trunc('month', voucher_date)::date,
+  (date_trunc('month', voucher_date) + interval '1 month - 1 day')::date,
+  coalesce(sum(sales_amount), 0),
+  coalesce(sum(purchase_amount), 0),
+  coalesce(sum(expense_amount), 0),
+  coalesce(sum(sales_amount - purchase_amount - expense_amount), 0),
+  coalesce(sum(cgst_amount + sgst_amount + igst_amount)
+    filter (where voucher_type = 'sales'), 0),
+  coalesce(sum(cgst_amount + sgst_amount + igst_amount)
+    filter (where voucher_type = 'purchase'), 0),
+  null,
+  now()
+from public.vouchers
+group by company_id, date_trunc('month', voucher_date)
+on conflict (company_id, period_start)
+do update set
+  period_date = excluded.period_date,
+  period_end = excluded.period_end,
+  total_sales = excluded.total_sales,
+  total_purchases = excluded.total_purchases,
+  total_expenses = excluded.total_expenses,
+  net_profit = excluded.net_profit,
+  gst_payable = excluded.gst_payable,
+  gst_input = excluded.gst_input,
+  updated_at = excluded.updated_at;
 
 create or replace function public.audit_voucher_change()
 returns trigger
@@ -314,13 +387,6 @@ create trigger trg_audit_voucher_change
 after insert or update or delete on public.vouchers
 for each row execute function public.audit_voucher_change();
 
-drop policy if exists "Admins can read audit logs" on public.audit_logs;
-create policy "Admins can read audit logs"
-  on public.audit_logs
-  for select
-  to authenticated
-  using (public.is_admin());
-
 alter table public.profiles enable row level security;
 alter table public.companies enable row level security;
 alter table public.company_employees enable row level security;
@@ -342,6 +408,13 @@ as $$
       and role = 'admin'
   );
 $$;
+
+drop policy if exists "Admins can read audit logs" on public.audit_logs;
+create policy "Admins can read audit logs"
+  on public.audit_logs
+  for select
+  to authenticated
+  using (public.is_admin());
 
 drop policy if exists "Users can read own profile" on public.profiles;
 create policy "Users can read own profile"
