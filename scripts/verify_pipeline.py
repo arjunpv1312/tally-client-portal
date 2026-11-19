@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 import secrets
 import sys
+import time
 import urllib.error
+import http.client
 import urllib.parse
 import urllib.request
 from decimal import Decimal
@@ -77,23 +79,29 @@ def rest_request(
         headers=headers,
         method=method,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            raw = response.read()
-            return response.status, json.loads(raw.decode("utf-8")) if raw else None
-    except urllib.error.HTTPError as error:
-        raw = error.read()
+    last_error: Exception | None = None
+    for attempt in range(3):
         try:
-            detail = json.loads(raw.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            detail = raw.decode("utf-8", "replace")
-        raise VerificationError(
-            f"Supabase REST {method} failed with HTTP {error.code}: {detail}"
-        ) from error
-    except urllib.error.URLError as error:
-        raise VerificationError(
-            f"Unable to reach Supabase REST API: {error.reason}"
-        ) from error
+            with urllib.request.urlopen(request, timeout=30) as response:
+                raw = response.read()
+                return response.status, json.loads(raw.decode("utf-8")) if raw else None
+        except urllib.error.HTTPError as error:
+            raw = error.read()
+            try:
+                detail = json.loads(raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                detail = raw.decode("utf-8", "replace")
+            raise VerificationError(
+                f"Supabase REST {method} failed with HTTP {error.code}: {detail}"
+            ) from error
+        except (urllib.error.URLError, http.client.RemoteDisconnected, TimeoutError, ConnectionResetError) as error:
+            last_error = error
+            if attempt < 2:
+                time.sleep(1 + attempt)
+            continue
+    raise VerificationError(
+        f"Unable to reach Supabase REST API after 3 attempts: {last_error}"
+    )
 
 
 def table_exists(table: str) -> bool:
