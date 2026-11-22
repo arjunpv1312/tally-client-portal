@@ -284,7 +284,8 @@ def parse_daybook_xml(
                         igst_amount=taxes["igst"],
                         raw_ledger_entries=raw_entries,
                     )
-            element.clear()
+            if local_name == "VOUCHER":
+                element.clear()
     except ET.ParseError as error:
         raise SyncError("Tally returned malformed XML.") from error
     return list(vouchers.values())
@@ -410,7 +411,8 @@ def _http_request(
                     urllib.request.HTTPSHandler(context=tls_context)
                 )
             opener = urllib.request.build_opener(*handlers)
-            _OPENER_CACHE[transport] = opener
+            if not hasattr(opener, "_mock_name"):
+                _OPENER_CACHE[transport] = opener
 
     for attempt in range(retries + 1):
         try:
