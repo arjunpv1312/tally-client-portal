@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Search } from "lucide-react";
 
@@ -72,9 +72,6 @@ export function VoucherTable({ vouchers }: VoucherTableProps) {
     return filteredVouchers.slice(start, start + pageSize);
   }, [filteredVouchers, page, pageSize, totalPages]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [query, voucherType, pageSize]);
   const cellPadding = compact ? "py-1.5" : "py-3";
 
   return (
@@ -94,7 +91,10 @@ export function VoucherTable({ vouchers }: VoucherTableProps) {
             <input
               type="search"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
               placeholder="Voucher or party"
               aria-label="Filter by voucher number or party name"
               className="min-h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition focus:border-[#E5C365] focus:ring-2 focus:ring-[#E5C365]/20 dark:border-white/10 dark:bg-slate-900 dark:text-slate-100"
@@ -102,7 +102,10 @@ export function VoucherTable({ vouchers }: VoucherTableProps) {
           </label>
           <select
             value={voucherType}
-            onChange={(event) => setVoucherType(event.target.value)}
+            onChange={(event) => {
+              setVoucherType(event.target.value);
+              setPage(1);
+            }}
             aria-label="Filter voucher type"
             className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 dark:border-white/10 dark:bg-slate-900 dark:text-slate-200"
           >
@@ -114,9 +117,10 @@ export function VoucherTable({ vouchers }: VoucherTableProps) {
           </select>
           <select
             value={pageSize}
-            onChange={(event) =>
-              setPageSize(Number(event.target.value) as 25 | 50 | 100)
-            }
+            onChange={(event) => {
+              setPageSize(Number(event.target.value) as 25 | 50 | 100);
+              setPage(1);
+            }}
             aria-label="Rows per page"
             className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 dark:border-white/10 dark:bg-slate-900 dark:text-slate-200"
           >

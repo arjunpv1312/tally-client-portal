@@ -17,8 +17,8 @@ export function DelayedSkeleton({
 
   useEffect(() => {
     if (!loading) {
-      setShow(false);
-      return;
+      const resetTimer = setTimeout(() => setShow(false), 0);
+      return () => clearTimeout(resetTimer);
     }
     const timer = setTimeout(() => setShow(true), thresholdMs);
     return () => clearTimeout(timer);

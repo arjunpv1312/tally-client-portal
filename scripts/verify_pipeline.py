@@ -603,7 +603,6 @@ def main(argv: list[str] | None = None) -> int:
                 "employee_work_logs",
                 "vouchers",
                 "financial_summaries",
-                "sync_runs",
                 "audit_logs",
             )
             if not table_exists(table)
