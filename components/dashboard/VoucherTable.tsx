@@ -56,7 +56,7 @@ export function VoucherTable({ vouchers }: VoucherTableProps) {
         !`${voucher.voucher_number ?? ""} ${voucher.party_name ?? ""} ${
           voucher.narration ?? ""
         }`
-          .toLower()
+          .toLowerCase()
           .includes(normalizedQuery)
       ) {
         continue;
