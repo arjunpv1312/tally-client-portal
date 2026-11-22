@@ -119,7 +119,7 @@ export function AppHeader({
               {itemIsActive(item) ? (
                 <motion.span
                   layoutId="nav-active-bg"
-                  transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                  transition={{ type: "spring", stiffness: 380, damping: 32 }}
                   className="absolute inset-0 rounded-xl bg-finora-gold/10"
                 />
               ) : null}
@@ -136,7 +136,7 @@ export function AppHeader({
               {itemIsActive(item) ? (
                 <motion.span
                   layoutId="nav-active-bg"
-                  transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                  transition={{ type: "spring", stiffness: 380, damping: 32 }}
                   className="absolute inset-0 rounded-xl bg-finora-gold/10"
                 />
               ) : null}
@@ -209,7 +209,7 @@ export function AppHeader({
           </AnimatePresence>
         </button>
       </div>
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {menuOpen ? (
           <>
             <motion.button
@@ -218,7 +218,7 @@ export function AppHeader({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ type: "spring", stiffness: 350, damping: 25 }}
+              transition={{ type: "spring", stiffness: 380, damping: 32 }}
               onClick={() => setMenuOpen(false)}
               className="fixed inset-0 z-40 cursor-default bg-slate-950/45 backdrop-blur-md md:hidden"
             />
@@ -227,7 +227,7 @@ export function AppHeader({
               initial={{ opacity: 0, x: "100%" }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: "100%" }}
-              transition={{ type: "spring", stiffness: 350, damping: 25 }}
+              transition={{ type: "spring", stiffness: 380, damping: 32 }}
               className="fixed inset-y-0 right-0 z-50 flex w-[min(88vw,22rem)] flex-col border-l border-finora-gold/20 bg-white/95 p-5 shadow-2xl backdrop-blur-xl transform-gpu dark:bg-finora-surface/95 md:hidden"
             >
               <div className="mb-5 flex items-center justify-between border-b border-finora-gold/15 pb-4">

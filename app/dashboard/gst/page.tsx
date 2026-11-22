@@ -11,7 +11,9 @@ import {
 } from "@/components/dashboard/DateFilter";
 import { DashboardContentSkeleton } from "@/components/dashboard/DashboardSkeleton";
 import { ExportButtons } from "@/components/ui/ExportButtons";
-import { SyncStatusPill } from "@/components/dashboard/SyncStatusPill";
+import { NetworkStatusPill } from "@/components/ui/NetworkStatusPill";
+import { NetworkErrorState } from "@/components/ui/NetworkErrorState";
+import { DelayedSkeleton } from "@/components/ui/DelayedSkeleton";
 import { getSupabase } from "@/lib/supabase";
 
 type GstVoucher = {
@@ -231,9 +233,11 @@ export default function GstReportPage() {
             { label: "GST Reports", href: "/dashboard/gst" },
           ]}
           statusControl={
-            <SyncStatusPill
-              lastVerifiedAt={lastVerifiedAt}
+            <NetworkStatusPill
+              lastSyncedAt={lastVerifiedAt}
               voucherCount={voucherCount}
+              realtimeStatus="SUBSCRIBED"
+              syncing={loading}
             />
           }
         />
@@ -245,11 +249,18 @@ export default function GstReportPage() {
         >
           <DateFilter onChange={setDateRange} />
           {loading ? (
-            <DashboardContentSkeleton />
+            <DelayedSkeleton loading={loading}>
+              <DashboardContentSkeleton />
+            </DelayedSkeleton>
           ) : error ? (
-            <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
-              {error}
-            </p>
+            <NetworkErrorState
+              explanation="The GST report could not be loaded. Your connection may be slow or temporarily unavailable."
+              onRetry={() => {
+                setError("");
+                setLoading(true);
+                setDateRange((current) => ({ ...current }));
+              }}
+            />
           ) : (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">

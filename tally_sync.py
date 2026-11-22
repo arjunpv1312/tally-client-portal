@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import atexit
 import hashlib
+import io
 import json
 import logging
 import os
+import random
 import re
 import signal
 import ssl
@@ -184,23 +186,9 @@ def parse_daybook_xml(
     xml_bytes: bytes, expense_ledger_names: set[str] | None = None
 ) -> list[Voucher]:
     try:
-        root = ET.fromstring(xml_bytes)
+        parser = ET.iterparse(io.BytesIO(xml_bytes), events=("end",))
     except ET.ParseError as error:
         raise SyncError("Tally returned malformed XML.") from error
-
-    line_errors = [
-        item.text.strip()
-        for item in root.iter()
-        if _local_name(item.tag) == "LINEERROR" and item.text and item.text.strip()
-    ]
-    if line_errors:
-        raise SyncError(f"Tally rejected the Day Book request: {line_errors[0]}")
-    if any(
-        item.text and item.text.strip() == "0"
-        for item in root.iter()
-        if _local_name(item.tag) == "STATUS"
-    ):
-        raise SyncError("Tally reported an unsuccessful Day Book export.")
 
     configured_expenses = {
         name.strip().casefold()
@@ -208,84 +196,97 @@ def parse_daybook_xml(
         if name.strip()
     }
     vouchers: dict[str, Voucher] = {}
-    for element in root.iter():
-        if _local_name(element.tag) != "VOUCHER":
-            continue
-        voucher_type = _normalize_voucher_type(
-            _attribute(element, "VCHTYPE", "VOUCHERTYPENAME")
-            or _child_text(element, "VOUCHERTYPENAME")
-        )
-        if voucher_type is None:
-            continue
-
-        voucher_date = _parse_date(_child_text(element, "DATE"))
-        raw_entries = _ledger_entries(element)
-        taxes = _tax_amounts(raw_entries)
-        tax_total = sum(taxes.values(), Decimal("0"))
-        voucher_amount = _child_text(element, "AMOUNT")
-        if voucher_amount is not None:
-            total_amount = abs(_decimal(voucher_amount))
-        else:
-            total_amount = sum(
-                (abs(_decimal(entry["amount"])) for entry in raw_entries),
-                Decimal("0"),
-            ) / 2
-        total_amount = _money(total_amount)
-
-        sales_amount = Decimal("0")
-        purchase_amount = Decimal("0")
-        expense_amount = Decimal("0")
-        if voucher_type == "sales":
-            sales_amount = _money(max(total_amount - tax_total, Decimal("0")))
-        elif voucher_type == "purchase":
-            purchase_amount = _money(max(total_amount - tax_total, Decimal("0")))
-        elif voucher_type == "payment" and configured_expenses:
-            expense_amount = _money(
-                sum(
-                    (
-                        abs(_decimal(entry["amount"]))
-                        for entry in raw_entries
-                        if entry["ledger_name"].casefold() in configured_expenses
-                    ),
-                    Decimal("0"),
+    try:
+        for _, element in parser:
+            local_name = _local_name(element.tag)
+            if local_name == "LINEERROR" and element.text and element.text.strip():
+                raise SyncError(
+                    f"Tally rejected the Day Book request: {element.text.strip()}"
                 )
-            )
+            if local_name == "STATUS" and element.text and element.text.strip() == "0":
+                raise SyncError("Tally reported an unsuccessful Day Book export.")
+            if local_name == "VOUCHER":
+                voucher_type = _normalize_voucher_type(
+                    _attribute(element, "VCHTYPE", "VOUCHERTYPENAME")
+                    or _child_text(element, "VOUCHERTYPENAME")
+                )
+                if voucher_type is not None:
+                    voucher_date = _parse_date(_child_text(element, "DATE"))
+                    raw_entries = _ledger_entries(element)
+                    taxes = _tax_amounts(raw_entries)
+                    tax_total = sum(taxes.values(), Decimal("0"))
+                    voucher_amount = _child_text(element, "AMOUNT")
+                    if voucher_amount is not None:
+                        total_amount = abs(_decimal(voucher_amount))
+                    else:
+                        total_amount = sum(
+                            (abs(_decimal(entry["amount"])) for entry in raw_entries),
+                            Decimal("0"),
+                        ) / 2
+                    total_amount = _money(total_amount)
 
-        voucher_number = _child_text(element, "VOUCHERNUMBER")
-        stable_id = (
-            _child_text(element, "MASTERID", "GUID", "REMOTEID")
-            or _attribute(element, "GUID", "REMOTEID")
-        )
-        if stable_id:
-            voucher_id = stable_id
-        elif voucher_number:
-            fallback_identity = (
-                f"{voucher_date.isoformat()}|{voucher_type}|{voucher_number}"
-            )
-            voucher_id = "fallback-" + hashlib.sha256(
-                fallback_identity.encode("utf-8")
-            ).hexdigest()
-        else:
-            raise SyncError(
-                "A Tally voucher has neither a stable ID nor a voucher number."
-            )
+                    sales_amount = Decimal("0")
+                    purchase_amount = Decimal("0")
+                    expense_amount = Decimal("0")
+                    if voucher_type == "sales":
+                        sales_amount = _money(max(total_amount - tax_total, Decimal("0")))
+                    elif voucher_type == "purchase":
+                        purchase_amount = _money(max(total_amount - tax_total, Decimal("0")))
+                    elif voucher_type == "payment" and configured_expenses:
+                        expense_amount = _money(
+                            sum(
+                                (
+                                    abs(_decimal(entry["amount"]))
+                                    for entry in raw_entries
+                                    if entry["ledger_name"].casefold()
+                                    in configured_expenses
+                                ),
+                                Decimal("0"),
+                            )
+                        )
 
-        vouchers[voucher_id] = Voucher(
-            tally_voucher_id=voucher_id,
-            voucher_number=voucher_number,
-            voucher_type=voucher_type,
-            voucher_date=voucher_date,
-            party_name=_child_text(element, "PARTYLEDGERNAME", "PARTYNAME"),
-            narration=_child_text(element, "NARRATION"),
-            total_amount=total_amount,
-            sales_amount=sales_amount,
-            purchase_amount=purchase_amount,
-            expense_amount=expense_amount,
-            cgst_amount=taxes["cgst"],
-            sgst_amount=taxes["sgst"],
-            igst_amount=taxes["igst"],
-            raw_ledger_entries=raw_entries,
-        )
+                    voucher_number = _child_text(element, "VOUCHERNUMBER")
+                    stable_id = (
+                        _child_text(element, "MASTERID", "GUID", "REMOTEID")
+                        or _attribute(element, "GUID", "REMOTEID")
+                    )
+                    if stable_id:
+                        voucher_id = stable_id
+                    elif voucher_number:
+                        fallback_identity = (
+                            f"{voucher_date.isoformat()}|{voucher_type}|"
+                            f"{voucher_number}"
+                        )
+                        voucher_id = "fallback-" + hashlib.sha256(
+                            fallback_identity.encode("utf-8")
+                        ).hexdigest()
+                    else:
+                        raise SyncError(
+                            "A Tally voucher has neither a stable ID nor "
+                            "a voucher number."
+                        )
+
+                    vouchers[voucher_id] = Voucher(
+                        tally_voucher_id=voucher_id,
+                        voucher_number=voucher_number,
+                        voucher_type=voucher_type,
+                        voucher_date=voucher_date,
+                        party_name=_child_text(
+                            element, "PARTYLEDGERNAME", "PARTYNAME"
+                        ),
+                        narration=_child_text(element, "NARRATION"),
+                        total_amount=total_amount,
+                        sales_amount=sales_amount,
+                        purchase_amount=purchase_amount,
+                        expense_amount=expense_amount,
+                        cgst_amount=taxes["cgst"],
+                        sgst_amount=taxes["sgst"],
+                        igst_amount=taxes["igst"],
+                        raw_ledger_entries=raw_entries,
+                    )
+            element.clear()
+    except ET.ParseError as error:
+        raise SyncError("Tally returned malformed XML.") from error
     return list(vouchers.values())
 
 
@@ -343,8 +344,34 @@ def summarize_vouchers(vouchers: list[Voucher]) -> list[dict[str, Any]]:
     return summaries
 
 
+def _deduplicate_vouchers(
+    company_id: str, vouchers: list[Voucher]
+) -> list[Voucher]:
+    """Return at most one voucher per (company_id, tally_voucher_id)."""
+    deduplicated: dict[tuple[str, str], Voucher] = {}
+    for voucher in vouchers:
+        key = (company_id, voucher.tally_voucher_id)
+        deduplicated[key] = voucher
+    return list(deduplicated.values())
+
+
+def _deduplicate_voucher_rows(
+    company_id: str, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    deduplicated: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        row_company_id = str(row.get("company_id") or company_id)
+        tally_id = str(row.get("tally_voucher_id", "")).strip()
+        if not tally_id:
+            continue
+        deduplicated[(row_company_id, tally_id)] = row
+    return list(deduplicated.values())
+
+
 def _retry_delay(attempt: int) -> None:
-    time.sleep(min(2**attempt, 30))
+    base = 0.5
+    delay = base * (2**attempt) + random.uniform(0, 0.5)
+    time.sleep(min(delay, 30))
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -361,18 +388,29 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
+_OPENER_CACHE: dict[str, urllib.request.OpenerDirector] = {}
+_OPENER_CACHE_LOCK = threading.Lock()
+
+
 def _http_request(
     request: urllib.request.Request, retries: int, timeout: int
 ) -> bytes:
-    handlers: list[Any] = [
-        urllib.request.ProxyHandler({}),
-        _NoRedirectHandler(),
-    ]
-    if request.full_url.startswith("https://"):
-        tls_context = ssl.create_default_context()
-        tls_context.minimum_version = ssl.TLSVersion.TLSv1_3
-        handlers.append(urllib.request.HTTPSHandler(context=tls_context))
-    opener = urllib.request.build_opener(*handlers)
+    transport = "https" if request.full_url.startswith("https://") else "http"
+    with _OPENER_CACHE_LOCK:
+        opener = _OPENER_CACHE.get(transport)
+        if opener is None:
+            handlers: list[Any] = [
+                urllib.request.ProxyHandler({}),
+                _NoRedirectHandler(),
+            ]
+            if transport == "https":
+                tls_context = ssl.create_default_context()
+                tls_context.minimum_version = ssl.TLSVersion.TLSv1_3
+                handlers.append(
+                    urllib.request.HTTPSHandler(context=tls_context)
+                )
+            opener = urllib.request.build_opener(*handlers)
+            _OPENER_CACHE[transport] = opener
 
     for attempt in range(retries + 1):
         try:
@@ -382,7 +420,7 @@ def _http_request(
                     raise SyncError("The Tally response exceeded the 50 MB limit.")
                 return body
         except urllib.error.HTTPError as error:
-            if error.code == 429 or 500 <= error.code < 600:
+            if error.code in {429, 502, 503, 504}:
                 if attempt < retries:
                     _retry_delay(attempt)
                     continue
@@ -488,6 +526,103 @@ def _summary_row(
     ):
         row[field] = str(summary[field])
     return row
+
+
+def _sync_worker_id() -> str:
+    configured = os.environ.get("FINORA_WORKER_ID", "").strip()
+    if configured:
+        return configured
+    hostname = (
+        os.environ.get("COMPUTERNAME")
+        or os.environ.get("HOSTNAME")
+        or "tally-worker"
+    ).strip()
+    return f"{hostname}:{uuid.uuid4()}"
+
+
+def _start_sync_run(
+    supabase_url: str,
+    service_key: str,
+    company_id: str,
+    worker_id: str,
+    retries: int,
+    timeout: int,
+) -> str | None:
+    payload = json.dumps(
+        {
+            "company_id": company_id,
+            "worker_id": worker_id,
+            "status": "running",
+            "vouchers_processed": 0,
+            "duration_ms": 0,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{supabase_url}/rest/v1/sync_runs",
+        data=payload,
+        headers={
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=representation",
+        },
+        method="POST",
+    )
+    try:
+        response = _http_request(request, retries, timeout)
+        rows = json.loads(response.decode("utf-8")) if response else []
+        if isinstance(rows, list) and rows:
+            return str(rows[0].get("id")) if rows[0].get("id") else None
+    except (SyncError, json.JSONDecodeError):
+        logger.warning(
+            "Sync telemetry unavailable; continuing without sync_runs."
+        )
+    return None
+
+
+def _complete_sync_run(
+    supabase_url: str,
+    service_key: str,
+    sync_run_id: str | None,
+    *,
+    status: str,
+    vouchers_processed: int,
+    duration_ms: int,
+    error_message: str | None,
+    retries: int,
+    timeout: int,
+) -> None:
+    if not sync_run_id:
+        return
+    payload = json.dumps(
+        {
+            "status": status,
+            "vouchers_processed": vouchers_processed,
+            "duration_ms": max(duration_ms, 0),
+            "error_message": error_message,
+            "completed_at": datetime.now().astimezone().isoformat(),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{supabase_url}/rest/v1/sync_runs?id=eq.{urllib.parse.quote(sync_run_id)}",
+        data=payload,
+        headers={
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        method="PATCH",
+    )
+    try:
+        _http_request(request, retries, timeout)
+    except SyncError:
+        logger.warning(
+            "Unable to complete sync telemetry run %s.",
+            sync_run_id,
+        )
 
 
 def _date_from_environment(name: str, fallback: date) -> date:
@@ -683,43 +818,90 @@ def run_sync() -> tuple[int, int]:
         for name in os.environ.get("TALLY_EXPENSE_LEDGER_NAMES", "").split(",")
         if name.strip()
     }
-    logger.info("Connecting to Tally XML Server at %s...", tally_url)
-    tally_xml = fetch_tally_daybook(
-        company_name, from_date, to_date, retries, timeout, tally_url
+    worker_id = _sync_worker_id()
+    started_monotonic = time.perf_counter()
+    sync_run_id = _start_sync_run(
+        supabase_url,
+        service_key,
+        company_id,
+        worker_id,
+        retries,
+        timeout,
     )
-    vouchers = parse_daybook_xml(tally_xml, expenses)
-    summaries = summarize_vouchers(vouchers)
-    logger.info(
-        "Extracted %d vouchers and %d monthly summaries.",
-        len(vouchers),
-        len(summaries),
-    )
-    synced_at = datetime.now().astimezone().isoformat()
 
-    voucher_rows = [_voucher_row(company_id, voucher) for voucher in vouchers]
-    _supabase_upsert(
-        supabase_url,
-        service_key,
-        "vouchers",
-        "company_id,tally_voucher_id",
-        voucher_rows,
-        retries,
-        timeout,
-    )
-    summary_rows = [
-        _summary_row(company_id, summary, synced_at) for summary in summaries
-    ]
-    _supabase_upsert(
-        supabase_url,
-        service_key,
-        "financial_summaries",
-        "company_id,period_start",
-        summary_rows,
-        retries,
-        timeout,
-    )
-    _write_sync_state(today)
-    return len(voucher_rows), len(summary_rows)
+    try:
+        logger.info("Connecting to Tally XML Server at %s...", tally_url)
+        tally_xml = fetch_tally_daybook(
+            company_name, from_date, to_date, retries, timeout, tally_url
+        )
+        vouchers = _deduplicate_vouchers(
+            company_id, parse_daybook_xml(tally_xml, expenses)
+        )
+        summaries = summarize_vouchers(vouchers)
+        logger.info(
+            "Extracted %d vouchers and %d monthly summaries.",
+            len(vouchers),
+            len(summaries),
+        )
+        synced_at = datetime.now().astimezone().isoformat()
+
+        voucher_rows = [
+            _voucher_row(company_id, voucher) for voucher in vouchers
+        ]
+        voucher_rows = _deduplicate_voucher_rows(company_id, voucher_rows)
+        _supabase_upsert(
+            supabase_url,
+            service_key,
+            "vouchers",
+            "company_id,tally_voucher_id",
+            voucher_rows,
+            retries,
+            timeout,
+        )
+        summary_rows = [
+            _summary_row(company_id, summary, synced_at)
+            for summary in summaries
+        ]
+        _supabase_upsert(
+            supabase_url,
+            service_key,
+            "financial_summaries",
+            "company_id,period_start",
+            summary_rows,
+            retries,
+            timeout,
+        )
+        _write_sync_state(today)
+        duration_ms = int((time.perf_counter() - started_monotonic) * 1000)
+        _complete_sync_run(
+            supabase_url,
+            service_key,
+            sync_run_id,
+            status="success",
+            vouchers_processed=len(voucher_rows),
+            duration_ms=duration_ms,
+            error_message=None,
+            retries=retries,
+            timeout=timeout,
+        )
+        return len(voucher_rows), len(summary_rows)
+    except Exception as error:
+        duration_ms = int((time.perf_counter() - started_monotonic) * 1000)
+        _complete_sync_run(
+            supabase_url,
+            service_key,
+            sync_run_id,
+            status="failed",
+            vouchers_processed=0,
+            duration_ms=duration_ms,
+            error_message=(
+                str(error) if isinstance(error, SyncError)
+                else "The sync worker encountered an unexpected error."
+            ),
+            retries=retries,
+            timeout=timeout,
+        )
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:

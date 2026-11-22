@@ -25,6 +25,8 @@ import { AdminSkeleton } from "@/components/admin/AdminSkeleton";
 import { CompanyDashboardPreview } from "@/components/admin/CompanyDashboardPreview";
 import { AuthGuard } from "@/components/AuthGuard";
 import { getBrowserSupabase } from "@/lib/supabase";
+import { DelayedSkeleton } from "@/components/ui/DelayedSkeleton";
+import { NetworkStatusPill } from "@/components/ui/NetworkStatusPill";
 import type { Profile, UserRole } from "@/types";
 
 type Company = {
@@ -142,6 +144,9 @@ export default function AdminPage() {
   );
   const [directoryErrors, setDirectoryErrors] = useState<DirectoryErrors>({});
   const [assignmentWarning, setAssignmentWarning] = useState("");
+  const [realtimeStatus, setRealtimeStatus] = useState<
+    "SUBSCRIBED" | "TIMED_OUT" | "CHANNEL_ERROR" | "CONNECTING"
+  >("CONNECTING");
 
   const employees = useMemo(
     () => profiles.filter((profile) => profile.role === "employee"),
@@ -299,6 +304,56 @@ export default function AdminPage() {
       cancelled = true;
     };
   }, [refreshDirectory]);
+
+  useEffect(() => {
+    const companyId = previewCompany?.id;
+    if (!companyId) return;
+
+    const supabase = getBrowserSupabase();
+    let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+    const scheduleRefresh = () => {
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      refreshTimeout = setTimeout(() => {
+        void refreshDirectory();
+      }, 1500);
+    };
+    const channel = supabase
+      .channel(`admin-company-realtime-${companyId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "vouchers",
+          filter: `company_id=eq.${companyId}`,
+        },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "financial_summaries",
+          filter: `company_id=eq.${companyId}`,
+        },
+        scheduleRefresh,
+      )
+      .subscribe((status) => {
+        if (
+          status === "SUBSCRIBED" ||
+          status === "TIMED_OUT" ||
+          status === "CHANNEL_ERROR"
+        ) {
+          setRealtimeStatus(status);
+        }
+      });
+
+    return () => {
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      void supabase.removeChannel(channel);
+    };
+  }, [previewCompany?.id, refreshDirectory]);
 
   async function completeAction(message: string) {
     await refreshDirectory();
@@ -589,7 +644,9 @@ export default function AdminPage() {
   if (loading) {
     return (
       <AuthGuard allow="admin">
-        <AdminSkeleton />
+        <DelayedSkeleton loading={loading}>
+          <AdminSkeleton />
+        </DelayedSkeleton>
       </AuthGuard>
     );
   }
@@ -601,6 +658,12 @@ export default function AdminPage() {
           title="Admin Dashboard"
           subtitle="Manage client companies, user access, and team assignments"
           roleLabel="Administrator"
+          statusControl={
+            <NetworkStatusPill
+              realtimeStatus={realtimeStatus}
+              voucherCount={0}
+            />
+          }
           commandCompanies={companies}
           onCommandCompanySelect={(company) => {
             const selectedCompany = companies.find(

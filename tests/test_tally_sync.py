@@ -7,11 +7,12 @@ from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request
 from unittest.mock import Mock, patch
 
 from tally_sync import (
+    _OPENER_CACHE,
     _NoRedirectHandler,
     SyncError,
     _load_env_file,
@@ -21,6 +22,9 @@ from tally_sync import (
     _write_sync_state,
     _supabase_upsert,
     _company_id_from_environment,
+    _deduplicate_vouchers,
+    _deduplicate_voucher_rows,
+    _retry_delay,
     _voucher_row,
     _validate_supabase_url,
     _validate_tally_url,
@@ -62,6 +66,35 @@ DAYBOOK_XML = b"""<?xml version="1.0"?>
 
 
 class TallySyncTests(unittest.TestCase):
+    def test_streaming_parser_handles_multiple_vouchers(self) -> None:
+        vouchers = parse_daybook_xml(DAYBOOK_XML)
+        self.assertEqual(len(vouchers), 3)
+        self.assertEqual(
+            {voucher.tally_voucher_id for voucher in vouchers},
+            {"sales-1", "purchase-1", "payment-1"},
+        )
+
+    def test_duplicate_vouchers_are_deduplicated_by_company_and_tally_id(self) -> None:
+        vouchers = parse_daybook_xml(DAYBOOK_XML)
+        duplicate = vouchers[0]
+        deduplicated = _deduplicate_vouchers(
+            "company-1",
+            [duplicate, duplicate],
+        )
+        self.assertEqual(len(deduplicated), 1)
+        rows = [_voucher_row("company-1", duplicate), _voucher_row("company-1", duplicate)]
+        deduplicated_rows = _deduplicate_voucher_rows("company-1", rows)
+        self.assertEqual(len(deduplicated_rows), 1)
+
+    def test_retry_delay_uses_exponential_backoff_and_jitter(self) -> None:
+        with (
+            patch("tally_sync.random.uniform", return_value=0.25) as jitter,
+            patch("tally_sync.time.sleep") as sleep,
+        ):
+            _retry_delay(2)
+        jitter.assert_called_once_with(0, 0.5)
+        sleep.assert_called_once_with(2.25)
+
     def test_builds_daybook_request_with_company_and_dates(self) -> None:
         request = build_daybook_request(
             "Client & Sons", date(2026, 4, 1), date(2026, 10, 31)
@@ -144,6 +177,29 @@ class TallySyncTests(unittest.TestCase):
         self.assertEqual(opener.open.call_count, 2)
         proxy_handler.assert_called_once_with({})
         retry_delay.assert_called_once_with(0)
+
+    def test_retries_http_429_and_503_with_backoff(self) -> None:
+        request = Request("http://localhost:9000")
+        with (
+            patch("tally_sync.urllib.request.build_opener") as build_opener,
+            patch("tally_sync.urllib.request.ProxyHandler") as proxy_handler,
+            patch("tally_sync._retry_delay") as retry_delay,
+        ):
+            opener = Mock()
+            opener.open.side_effect = [
+                HTTPError(request.full_url, 429, "busy", {}, None),
+                HTTPError(request.full_url, 503, "unavailable", {}, None),
+                BytesIO(b"response"),
+            ]
+            build_opener.return_value = opener
+            _OPENER_CACHE.pop("http", None)
+            self.assertEqual(
+                _http_request(request, retries=2, timeout=1),
+                b"response",
+            )
+        self.assertEqual(opener.open.call_count, 3)
+        self.assertEqual(retry_delay.call_count, 2)
+        proxy_handler.assert_called_once_with({})
 
     def test_https_requests_use_direct_tls_13_transport(self) -> None:
         request = Request("https://project.example/rest/v1/vouchers")

@@ -73,10 +73,27 @@ create table if not exists public.employee_work_logs (
   check (total_hours is null or total_hours >= 0)
 );
 
+create table if not exists public.sync_runs (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  worker_id text not null,
+  status text not null check (status in ('running', 'success', 'partial', 'failed')),
+  vouchers_processed int not null default 0,
+  duration_ms int not null default 0,
+  error_message text,
+  started_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+create index if not exists sync_runs_company_started_idx
+  on public.sync_runs (company_id, started_at desc);
+
 create index if not exists employee_work_logs_user_login_idx
   on public.employee_work_logs (user_id, login_time desc);
 create index if not exists employee_work_logs_company_login_idx
   on public.employee_work_logs (company_id, login_time desc);
+create index if not exists employee_work_logs_company_user_login_idx
+  on public.employee_work_logs (company_id, user_id, login_time desc);
 
 create table if not exists public.vouchers (
   id uuid primary key default gen_random_uuid(),
@@ -144,6 +161,10 @@ alter table public.financial_summaries
 
 create index if not exists vouchers_company_date_idx
   on public.vouchers (company_id, voucher_date desc);
+create index if not exists vouchers_company_date_type_idx
+  on public.vouchers (company_id, voucher_date desc, voucher_type);
+create index if not exists vouchers_company_number_idx
+  on public.vouchers (company_id, voucher_number);
 
 create index if not exists financial_summaries_company_period_idx
   on public.financial_summaries (company_id, period_start);
@@ -179,132 +200,87 @@ security definer
 set search_path = public
 as $$
 declare
-  target_company_id uuid;
-  target_period_start date;
-  target_period_end date;
-  sales numeric(18, 2);
-  purchases numeric(18, 2);
-  expenses numeric(18, 2);
-  gst_payable numeric(18, 2);
-  gst_input numeric(18, 2);
+  changed_rows_sql text;
 begin
-  if tg_op = 'DELETE' then
-    target_company_id := old.company_id;
-    target_period_start := date_trunc('month', old.voucher_date)::date;
+  if tg_op = 'INSERT' then
+    changed_rows_sql := 'select company_id, voucher_date from new_table';
+  elsif tg_op = 'UPDATE' then
+    changed_rows_sql :=
+      'select company_id, voucher_date from old_table '
+      'union all select company_id, voucher_date from new_table';
+  elsif tg_op = 'DELETE' then
+    changed_rows_sql := 'select company_id, voucher_date from old_table';
   else
-    target_company_id := new.company_id;
-    target_period_start := date_trunc('month', new.voucher_date)::date;
+    return null;
   end if;
 
-  target_period_end := (target_period_start + interval '1 month - 1 day')::date;
-
-  select
-    coalesce(sum(sales_amount), 0),
-    coalesce(sum(purchase_amount), 0),
-    coalesce(sum(expense_amount), 0),
-    coalesce(sum(cgst_amount + sgst_amount + igst_amount)
-      filter (where voucher_type = 'sales'), 0),
-    coalesce(sum(cgst_amount + sgst_amount + igst_amount)
-      filter (where voucher_type = 'purchase'), 0)
-  into sales, purchases, expenses, gst_payable, gst_input
-  from public.vouchers
-  where company_id = target_company_id
-    and voucher_date >= target_period_start
-    and voucher_date <= target_period_end;
-
-  insert into public.financial_summaries (
-    company_id,
-    period_date,
-    period_start,
-    period_end,
-    total_sales,
-    total_purchases,
-    total_expenses,
-    net_profit,
-    gst_payable,
-    gst_input,
-    last_synced_at,
-    updated_at
-  )
-  values (
-    target_company_id,
-    target_period_start,
-    target_period_start,
-    target_period_end,
-    sales,
-    purchases,
-    expenses,
-    sales - purchases - expenses,
-    gst_payable,
-    gst_input,
-    now(),
-    now()
-  )
-  on conflict (company_id, period_start)
-  do update set
-    period_date = excluded.period_date,
-    period_end = excluded.period_end,
-    total_sales = excluded.total_sales,
-    total_purchases = excluded.total_purchases,
-    total_expenses = excluded.total_expenses,
-    net_profit = excluded.net_profit,
-    gst_payable = excluded.gst_payable,
-    gst_input = excluded.gst_input,
-    last_synced_at = excluded.last_synced_at,
-    updated_at = excluded.updated_at;
-
-  if tg_op = 'UPDATE'
-     and (old.company_id is distinct from new.company_id
-       or old.voucher_date is distinct from new.voucher_date) then
-    target_company_id := old.company_id;
-    target_period_start := date_trunc('month', old.voucher_date)::date;
-    target_period_end := (target_period_start + interval '1 month - 1 day')::date;
-    select
-      coalesce(sum(sales_amount), 0),
-      coalesce(sum(purchase_amount), 0),
-      coalesce(sum(expense_amount), 0),
-      coalesce(sum(cgst_amount + sgst_amount + igst_amount)
-        filter (where voucher_type = 'sales'), 0),
-      coalesce(sum(cgst_amount + sgst_amount + igst_amount)
-        filter (where voucher_type = 'purchase'), 0)
-    into sales, purchases, expenses, gst_payable, gst_input
-    from public.vouchers
-    where company_id = target_company_id
-      and voucher_date >= target_period_start
-      and voucher_date <= target_period_end;
-    insert into public.financial_summaries (
-      company_id, period_date, period_start, period_end, total_sales,
-      total_purchases, total_expenses, net_profit,
-      gst_payable, gst_input, last_synced_at, updated_at
-    )
-    values (
-      target_company_id, target_period_start, target_period_start, target_period_end,
-      sales, purchases, expenses, sales - purchases - expenses,
-      gst_payable, gst_input, now(), now()
-    )
-    on conflict (company_id, period_start)
-    do update set
-      period_date = excluded.period_date,
-      period_end = excluded.period_end,
-      total_sales = excluded.total_sales,
-      total_purchases = excluded.total_purchases,
-      total_expenses = excluded.total_expenses,
-      net_profit = excluded.net_profit,
-      gst_payable = excluded.gst_payable,
-      gst_input = excluded.gst_input,
-      last_synced_at = excluded.last_synced_at,
-      updated_at = excluded.updated_at;
-  end if;
-
+  execute
+    'with affected as (
+       select distinct company_id,
+         date_trunc(''month'', voucher_date)::date as period_start
+       from (' || changed_rows_sql || ') changed
+     ),
+     monthly_totals as (
+       select
+         affected.company_id,
+         affected.period_start,
+         coalesce(sum(v.sales_amount), 0)::numeric(18, 2) as sales,
+         coalesce(sum(v.purchase_amount), 0)::numeric(18, 2) as purchases,
+         coalesce(sum(v.expense_amount), 0)::numeric(18, 2) as expenses,
+         coalesce(sum(v.cgst_amount + v.sgst_amount + v.igst_amount)
+           filter (where v.voucher_type = ''sales''), 0)::numeric(18, 2) as gst_payable,
+         coalesce(sum(v.cgst_amount + v.sgst_amount + v.igst_amount)
+           filter (where v.voucher_type = ''purchase''), 0)::numeric(18, 2) as gst_input
+       from affected
+       left join public.vouchers v
+         on v.company_id = affected.company_id
+        and v.voucher_date >= affected.period_start
+        and v.voucher_date < (affected.period_start + interval ''1 month'')::date
+       group by affected.company_id, affected.period_start
+     )
+     insert into public.financial_summaries (
+       company_id, period_date, period_start, period_end,
+       total_sales, total_purchases, total_expenses, net_profit,
+       gst_payable, gst_input, last_synced_at, updated_at
+     )
+     select
+       company_id, period_start, period_start,
+       (period_start + interval ''1 month - 1 day'')::date,
+       sales, purchases, expenses, sales - purchases - expenses,
+       gst_payable, gst_input, now(), now()
+     from monthly_totals
+     on conflict (company_id, period_start)
+     do update set
+       period_date = excluded.period_date,
+       period_end = excluded.period_end,
+       total_sales = excluded.total_sales,
+       total_purchases = excluded.total_purchases,
+       total_expenses = excluded.total_expenses,
+       net_profit = excluded.net_profit,
+       gst_payable = excluded.gst_payable,
+       gst_input = excluded.gst_input,
+       last_synced_at = excluded.last_synced_at,
+       updated_at = excluded.updated_at';
   return null;
 end;
 $$;
 
 drop trigger if exists trg_auto_recalculate_financial_summary on public.vouchers;
 drop trigger if exists trg_vouchers_auto_summary on public.vouchers;
-create trigger trg_auto_recalculate_financial_summary
-after insert or update or delete on public.vouchers
-for each row execute function public.recalculate_financial_summary_for_voucher();
+create trigger trg_auto_recalculate_financial_summary_insert
+after insert on public.vouchers
+referencing new table as new_table
+for each statement execute function public.recalculate_financial_summary_for_voucher();
+
+create trigger trg_auto_recalculate_financial_summary_update
+after update on public.vouchers
+referencing old table as old_table new table as new_table
+for each statement execute function public.recalculate_financial_summary_for_voucher();
+
+create trigger trg_auto_recalculate_financial_summary_delete
+after delete on public.vouchers
+referencing old table as old_table
+for each statement execute function public.recalculate_financial_summary_for_voucher();
 
 insert into public.financial_summaries (
   company_id,
@@ -393,6 +369,7 @@ alter table public.company_employees enable row level security;
 alter table public.employee_work_logs enable row level security;
 alter table public.vouchers enable row level security;
 alter table public.financial_summaries enable row level security;
+alter table public.sync_runs enable row level security;
 
 create or replace function public.is_admin()
 returns boolean
@@ -549,6 +526,27 @@ create policy "Users can read authorized financial summaries"
       select 1
       from public.company_employees
       where company_employees.company_id = financial_summaries.company_id
+        and company_employees.employee_id = auth.uid()
+    )
+  );
+
+drop policy if exists "Users can read authorized sync runs" on public.sync_runs;
+create policy "Users can read authorized sync runs"
+  on public.sync_runs
+  for select
+  to authenticated
+  using (
+    public.is_admin()
+    or exists (
+      select 1
+      from public.profiles
+      where profiles.id = auth.uid()
+        and profiles.company_id = sync_runs.company_id
+    )
+    or exists (
+      select 1
+      from public.company_employees
+      where company_employees.company_id = sync_runs.company_id
         and company_employees.employee_id = auth.uid()
     )
   );

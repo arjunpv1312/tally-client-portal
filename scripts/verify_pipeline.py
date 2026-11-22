@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import secrets
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 import http.client
 import urllib.error
 import urllib.parse
@@ -166,6 +168,7 @@ def cleanup_test_data(
         "vouchers": 0,
         "financial_summaries": 0,
         "employee_work_logs": 0,
+        "sync_runs": 0,
         "audit_logs": 0,
         "profiles": 0,
         "auth_users": 0,
@@ -219,6 +222,15 @@ def cleanup_test_data(
                 {"company_id": f"eq.{company_id}"},
             )
             counts["financial_summaries"] += len(before)
+
+    if table_exists("sync_runs"):
+        for company_id in target_ids:
+            before = get_rows(
+                "sync_runs",
+                {"select": "id", "company_id": f"eq.{company_id}", "limit": "1000"},
+            )
+            delete_rows("sync_runs", {"company_id": f"eq.{company_id}"})
+            counts["sync_runs"] += len(before)
 
     if table_exists("employee_work_logs"):
         for company_id in target_ids:
@@ -287,6 +299,7 @@ def assert_zero_test_residue(
         "vouchers": 0,
         "financial_summaries": 0,
         "employee_work_logs": 0,
+        "sync_runs": 0,
         "audit_logs": 0,
         "profiles": 0,
     }
@@ -334,6 +347,17 @@ def assert_zero_test_residue(
             if (
                 contains_test_marker(json.dumps(row, ensure_ascii=False))
                 or str(row.get("company_id", "")) in known_test_company_ids
+            )
+        )
+
+    if table_exists("sync_runs"):
+        sync_runs = get_rows("sync_runs", {"select": "*", "limit": "10000"})
+        residue["sync_runs"] = sum(
+            1
+            for row in sync_runs
+            if (
+                str(row.get("company_id", "")) in known_test_company_ids
+                or contains_test_marker(json.dumps(row, ensure_ascii=False))
             )
         )
 
@@ -445,7 +469,118 @@ def create_employee_profile_and_work_log(
     return employee_id, str(work_log["id"])
 
 
-def main() -> int:
+def run_multi_company_concurrency_check() -> dict[str, Decimal]:
+    company_ids: set[str] = set()
+    company_totals: dict[str, Decimal] = {}
+
+    def create_company(worker_index: int) -> tuple[str, str]:
+        name = f"{TEST_MARKER} Concurrent {worker_index}"
+        status, companies = rest_request(
+            "POST",
+            "/rest/v1/companies",
+            payload={"name": name, "gstin": None, "email": None, "phone": None},
+            prefer="return=representation",
+        )
+        if status not in {200, 201} or not isinstance(companies, list) or not companies:
+            raise VerificationError(
+                f"Concurrent test company {worker_index} could not be created."
+            )
+        company_id = str(companies[0]["id"])
+        company_ids.add(company_id)
+        return company_id, name
+
+    def upsert_worker(worker_index: int) -> tuple[str, str]:
+        company_id, name = create_company(worker_index)
+        expected_sales = Decimal(str(100 * (worker_index + 1)))
+        payload = [
+            {
+                "company_id": company_id,
+                "tally_voucher_id": f"{TEST_MARKER}-CONCURRENT-{worker_index}-SALES",
+                "voucher_number": f"E2E-CONCURRENT-{worker_index}",
+                "voucher_type": "sales",
+                "date": "2026-10-15",
+                "voucher_date": "2026-10-15",
+                "party_name": f"{name} Customer",
+                "narration": f"{TEST_MARKER} concurrent sales",
+                "total_amount": str(expected_sales),
+                "amount": str(expected_sales),
+                "sales_amount": str(expected_sales),
+                "purchase_amount": "0",
+                "expense_amount": "0",
+                "cgst_amount": "0",
+                "sgst_amount": "0",
+                "igst_amount": "0",
+                "raw_ledger_entries": [],
+            }
+        ]
+        rest_request(
+            "POST",
+            "/rest/v1/vouchers",
+            payload=payload,
+            prefer="resolution=merge-duplicates,return=representation",
+        )
+        company_totals[company_id] = expected_sales
+        return company_id, name
+
+    try:
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            results = list(executor.map(upsert_worker, range(6)))
+        for company_id, _ in results:
+            rows = get_rows(
+                "vouchers",
+                {
+                    "select": "id,company_id,tally_voucher_id,sales_amount",
+                    "company_id": f"eq.{company_id}",
+                    "limit": "100",
+                },
+            )
+            if len(rows) != 1:
+                raise VerificationError(
+                    f"Concurrent company {company_id} did not retain exactly one voucher."
+                )
+            if any(str(row.get("company_id")) != company_id for row in rows):
+                raise VerificationError(
+                    f"Cross-company voucher merging detected for {company_id}."
+                )
+            summaries = get_rows(
+                "financial_summaries",
+                {
+                    "select": "company_id,total_sales",
+                    "company_id": f"eq.{company_id}",
+                    "period_start": "eq.2026-10-01",
+                    "limit": "10",
+                },
+            )
+            if len(summaries) != 1:
+                raise VerificationError(
+                    f"Concurrent summary was missing for company {company_id}."
+                )
+            actual_sales = decimal_value(summaries[0]["total_sales"])
+            if actual_sales != company_totals[company_id]:
+                raise VerificationError(
+                    f"Concurrent summary collision for {company_id}: "
+                    f"expected {company_totals[company_id]}, found {actual_sales}."
+                )
+        print(
+            "[SUCCESS] Multi-company concurrent verification passed:",
+            f"{len(results)} isolated companies.",
+        )
+    finally:
+        cleanup_test_data(company_ids=company_ids)
+        assert_zero_test_residue(company_ids)
+    return company_totals
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Verify the FINORA Supabase pipeline and synthetic data cleanup."
+    )
+    parser.add_argument(
+        "--concurrency-test",
+        action="store_true",
+        help="run the multi-company concurrent upsert check only",
+    )
+    arguments = parser.parse_args(argv)
     company_id = ""
     created_auth_user_ids: set[str] = set()
     exit_code = 0
@@ -455,6 +590,11 @@ def main() -> int:
             "[INFO] Initial test-data cleanup complete.",
         )
 
+        if arguments.concurrency_test:
+            run_multi_company_concurrency_check()
+            print("[SUCCESS] Concurrency-only verification passed.")
+            return 0
+
         missing_tables = [
             table
             for table in (
@@ -463,6 +603,7 @@ def main() -> int:
                 "employee_work_logs",
                 "vouchers",
                 "financial_summaries",
+                "sync_runs",
                 "audit_logs",
             )
             if not table_exists(table)
@@ -471,6 +612,8 @@ def main() -> int:
             raise VerificationError(
                 "Required pipeline tables are missing: " + ", ".join(missing_tables)
             )
+
+        run_multi_company_concurrency_check()
 
         status, companies = rest_request(
             "POST",

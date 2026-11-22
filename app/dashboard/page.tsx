@@ -26,7 +26,10 @@ import {
   type DateRange,
 } from "@/components/dashboard/DateFilter";
 import { ExportButtons } from "@/components/ui/ExportButtons";
-import { SyncStatusPill } from "@/components/dashboard/SyncStatusPill";
+import { NetworkStatusPill } from "@/components/ui/NetworkStatusPill";
+import { NetworkErrorState } from "@/components/ui/NetworkErrorState";
+import { DelayedSkeleton } from "@/components/ui/DelayedSkeleton";
+import { calculateFinancialMetrics } from "@/lib/analytics/financialEngine";
 import { getBrowserSupabase, getSupabase } from "@/lib/supabase";
 
 type SummaryRow = {
@@ -400,6 +403,10 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
   const [realtimeError, setRealtimeError] = useState("");
+  const [realtimeStatus, setRealtimeStatus] = useState<
+    "SUBSCRIBED" | "TIMED_OUT" | "CHANNEL_ERROR" | "CONNECTING"
+  >("CONNECTING");
+  const [fetchLatencyMs, setFetchLatencyMs] = useState(0);
 
   const handleDateRangeChange = useCallback((range: DateRange) => {
     setLoading(true);
@@ -409,10 +416,13 @@ export default function DashboardPage() {
 
   const refreshFromRealtime = useCallback(async () => {
     try {
+      setLoading(true);
+      const startedAt = performance.now();
       const data = await fetchDashboardData(
         dateRange.startDate,
         dateRange.endDate,
       );
+      setFetchLatencyMs(Math.round(performance.now() - startedAt));
       setDashboard(data);
       setError("");
       setRealtimeError("");
@@ -423,6 +433,8 @@ export default function DashboardPage() {
           : "Unable to refresh live financial data.";
       setRealtimeError(message);
       toast.error(`Live dashboard update failed: ${message}`);
+    } finally {
+      setLoading(false);
     }
   }, [dateRange.endDate, dateRange.startDate]);
 
@@ -461,6 +473,10 @@ export default function DashboardPage() {
       );
     },
     [dashboard?.summaries, dashboard?.vouchers],
+  );
+  const financialAnalytics = useMemo(
+    () => calculateFinancialMetrics(dashboard?.vouchers ?? []),
+    [dashboard?.vouchers],
   );
   const latest = chartData.at(-1);
   const latestSummary = dashboard?.summaries.at(-1);
@@ -522,9 +538,15 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const startedAt = performance.now();
     void fetchDashboardData(dateRange.startDate, dateRange.endDate)
       .then((data) => {
-        if (!cancelled) setDashboard(data);
+        if (!cancelled) {
+          setFetchLatencyMs(
+            Math.round(performance.now() - startedAt),
+          );
+          setDashboard(data);
+        }
       })
       .catch((loadError: unknown) => {
         if (cancelled) return;
@@ -583,6 +605,13 @@ export default function DashboardPage() {
         },
       )
       .subscribe((status, subscriptionError) => {
+        if (
+          status === "SUBSCRIBED" ||
+          status === "TIMED_OUT" ||
+          status === "CHANNEL_ERROR"
+        ) {
+          setRealtimeStatus(status);
+        }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           const message =
             subscriptionError?.message ??
@@ -611,13 +640,16 @@ export default function DashboardPage() {
             { label: "GST Reports", href: "/dashboard/gst" },
           ]}
           statusControl={
-            <SyncStatusPill
-              lastVerifiedAt={
+            <NetworkStatusPill
+              lastSyncedAt={
                 latestSummary?.last_synced_at ??
                 latestSummary?.updated_at ??
                 null
               }
               voucherCount={dashboard?.vouchers.length ?? 0}
+              realtimeStatus={realtimeStatus}
+              fetchLatencyMs={fetchLatencyMs}
+              syncing={loading}
             />
           }
         />
@@ -629,24 +661,20 @@ export default function DashboardPage() {
         >
           <DateFilter onChange={handleDateRangeChange} />
           {loading ? (
-            <DashboardContentSkeleton />
+            <DelayedSkeleton loading={loading}>
+              <DashboardContentSkeleton />
+            </DelayedSkeleton>
           ) : error ? (
-            <section className="rounded-xl border border-rose-200 bg-rose-50 p-6 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/30">
-              <p role="alert" className="text-sm text-rose-800 dark:text-rose-200">
-                {error}
-              </p>
-              <button
-                type="button"
-                onClick={() => {
+            <NetworkErrorState
+              explanation={
+                "The financial data could not be loaded. Your connection may be slow or temporarily unavailable."
+              }
+              onRetry={() => {
                   setError("");
                   setLoading(true);
                   setReloadVersion((version) => version + 1);
-                }}
-                className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 dark:bg-[#60A5FA] dark:text-slate-950"
-              >
-                Retry
-              </button>
-            </section>
+              }}
+            />
           ) : (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
@@ -670,6 +698,40 @@ export default function DashboardPage() {
                     />
                   ))}
                 </div>
+              ) : null}
+              {dashboard?.vouchers.length ? (
+                <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ["Working capital", financialAnalytics.workingCapital],
+                    ["Cash-flow velocity", financialAnalytics.cashFlowVelocity],
+                    ["Net inflow", financialAnalytics.netInflow],
+                    ["Net outflow", financialAnalytics.netOutflow],
+                  ].map(([label, value]) => (
+                    <article
+                      key={String(label)}
+                      className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 dark:border-white/[0.08] dark:bg-[#111722]"
+                    >
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        {label}
+                      </p>
+                      <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-slate-900 dark:text-[#F8F4E8]">
+                        {new Intl.NumberFormat("en-IN", {
+                          style: "currency",
+                          currency: "INR",
+                          maximumFractionDigits: 0,
+                        }).format(Number(value))}
+                      </p>
+                    </article>
+                  ))}
+                  {financialAnalytics.trends.map((trend) => (
+                    <p
+                      key={trend.days}
+                      className="rounded-lg border border-finora-gold/15 px-3 py-2 text-xs text-slate-500 dark:text-slate-400"
+                    >
+                      {trend.days}-day net: {trend.netCashFlow.toLocaleString("en-IN")}
+                    </p>
+                  ))}
+                </section>
               ) : null}
 
               {lastSyncedAt ? (
